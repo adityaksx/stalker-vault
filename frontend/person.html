@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Person — Vault</title>
+  <link rel="stylesheet" href="/static/style.css"/>
+  <style>
+    .added-date { font-size:0.75rem; color:var(--muted); margin-top:0.5rem; }
+    .field-meta { display:flex; align-items:center; justify-content:space-between; margin-top:0.5rem; }
+    .field-time { font-size:0.72rem; color:var(--muted); }
+    .field-sublabel { color:var(--muted); font-size:0.72rem; }
+    .field-del {
+      background:none; border:none; color:var(--muted); cursor:pointer;
+      font-size:0.78rem; padding:0.1rem 0.3rem; border-radius:4px;
+      transition:color 0.15s;
+    }
+    .field-del:hover { color:var(--red); }
+    .media-item { display:flex; flex-direction:column; gap:0.3rem; }
+    .media-caption { font-size:0.78rem; color:var(--muted2); }
+    .media-meta { font-size:0.72rem; color:var(--muted); display:flex; align-items:center; justify-content:space-between; }
+    .section-empty { color:var(--muted); font-size:0.88rem; padding:0.5rem 0; }
+
+    /* Add panels */
+    .add-panels { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-top:2rem; }
+    @media(max-width:700px){ .add-panels { grid-template-columns:1fr; } }
+    .add-panel {
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:10px; padding:1.2rem 1.3rem;
+    }
+    .add-panel h3 { font-size:0.85rem; color:var(--muted2); margin-bottom:1rem; letter-spacing:0.05em; text-transform:uppercase; }
+    .inline-row { display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; }
+    select {
+      width:100%; background:#0d0d0d; border:1px solid var(--border2);
+      border-radius:7px; color:var(--text); font-size:0.88rem;
+      padding:0.55rem 0.7rem; outline:none; font-family:inherit;
+    }
+    select:focus { border-color:#444; }
+    .form-group { margin-bottom:0.75rem; }
+    .form-group label { display:block; font-size:0.78rem; color:var(--muted2); margin-bottom:0.3rem; }
+    .form-group input, .form-group textarea {
+      width:100%; background:#0d0d0d; border:1px solid var(--border2);
+      border-radius:7px; color:var(--text); font-size:0.88rem;
+      padding:0.55rem 0.75rem; outline:none; font-family:inherit; transition:border-color 0.2s;
+    }
+    .form-group input:focus, .form-group textarea:focus { border-color:#444; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🕵️ <span>Vault</span></div>
+  <nav><a href="/">← All People</a></nav>
+</header>
+
+<div class="page">
+
+  <a class="back-link" href="/">← Back to vault</a>
+
+  <!-- Hero -->
+  <div id="hero-section"></div>
+
+  <hr/>
+
+  <!-- Fields -->
+  <div id="fields-section"></div>
+
+  <hr/>
+
+  <!-- Media -->
+  <div id="media-section"></div>
+
+  <hr/>
+
+  <!-- Add panels -->
+  <div class="add-panels">
+
+    <!-- Add Field -->
+    <div class="add-panel">
+      <h3>➕ Add Info Field</h3>
+      <form id="add-field-form">
+        <div class="form-group">
+          <label>Field Type</label>
+          <select name="field_type">
+            <optgroup label="── Social ──">
+              <option value="instagram">📸 Instagram</option>
+              <option value="snapchat">👻 Snapchat</option>
+              <option value="twitter">𝕏 X / Twitter</option>
+              <option value="linkedin">💼 LinkedIn URL</option>
+              <option value="pinterest">📌 Pinterest</option>
+              <option value="facebook">📘 Facebook URL</option>
+              <option value="tiktok">🎵 TikTok</option>
+              <option value="youtube">▶️ YouTube URL</option>
+              <option value="telegram">✈️ Telegram</option>
+              <option value="discord">🎮 Discord Tag</option>
+              <option value="reddit">🤖 Reddit</option>
+              <option value="threads">🧵 Threads</option>
+              <option value="bereal">📷 BeReal</option>
+            </optgroup>
+            <optgroup label="── Contact ──">
+              <option value="phone">📞 Phone</option>
+              <option value="email">📧 Email</option>
+              <option value="whatsapp">💬 WhatsApp</option>
+            </optgroup>
+            <optgroup label="── Identity ──">
+              <option value="nickname">🏷 Nickname</option>
+              <option value="dob">🎂 Date of Birth</option>
+              <option value="gender">⚧ Gender</option>
+            </optgroup>
+            <optgroup label="── Education ──">
+              <option value="school">🏫 School</option>
+              <option value="college">🎓 College</option>
+            </optgroup>
+            <optgroup label="── Work ──">
+              <option value="workplace">🏢 Workplace</option>
+              <option value="jobtitle">💼 Job Title</option>
+              <option value="github">🐙 GitHub Username</option>
+              <option value="website">🌐 Website</option>
+            </optgroup>
+            <optgroup label="── Location ──">
+              <option value="location">📍 Location</option>
+              <option value="address">🏠 Address</option>
+            </optgroup>
+            <optgroup label="── Misc ──">
+              <option value="note">📝 Note</option>
+              <option value="tag">🔖 Tag</option>
+              <option value="custom">✏️ Custom</option>
+            </optgroup>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Value</label>
+          <input type="text" name="value" placeholder="Enter value..." required/>
+        </div>
+        <div class="form-group">
+          <label>Label <span style="color:#555;font-size:0.74rem;">(optional — e.g. "main", "work")</span></label>
+          <input type="text" name="label" placeholder="optional label"/>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%">Add Field</button>
+      </form>
+    </div>
+
+    <!-- Add Media -->
+    <div class="add-panel">
+      <h3>📎 Add Media / File</h3>
+      <form id="add-media-form" enctype="multipart/form-data">
+        <div class="form-group">
+          <label>Type</label>
+          <select name="media_type" id="media-type-select">
+            <option value="photo">🖼 Photo</option>
+            <option value="screenshot">📸 Screenshot</option>
+            <option value="video">🎬 Video</option>
+            <option value="repo_url">🐙 GitHub Repo URL</option>
+            <option value="repo_zip">📦 Repo ZIP</option>
+            <option value="other">📎 Other File</option>
+          </select>
+        </div>
+
+        <!-- File upload -->
+        <div id="media-file-group">
+          <div class="form-group">
+            <label>File</label>
+            <label class="file-label">
+              📂 Click to choose file
+              <input type="file" name="file" accept="image/*,video/*,.zip,.tar,.gz"/>
+            </label>
+          </div>
+        </div>
+
+        <!-- Repo URL input -->
+        <div id="media-url-group" style="display:none">
+          <div class="form-group">
+            <label>GitHub Repo URL</label>
+            <input type="url" name="repo_url" placeholder="https://github.com/user/repo"/>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Caption <span style="color:#555;font-size:0.74rem;">(optional)</span></label>
+          <input type="text" name="caption" placeholder="e.g. profile ss from jan 2025"/>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%">Upload</button>
+      </form>
+    </div>
+
+  </div>
+  <!-- /add-panels -->
+
+</div>
+
+<!-- Lightbox -->
+<div class="lightbox" id="lightbox">
+  <button class="lightbox-close">✕</button>
+  <img id="lightbox-img" src="" alt=""/>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script src="/static/person.js"></script>
+</body>
+</html>
