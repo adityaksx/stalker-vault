@@ -1,54 +1,43 @@
-import sqlite3, json
+import sqlite3
 from pathlib import Path
-from datetime import datetime
 
 DB_PATH = Path(__file__).parent / "vault.db"
 
 def get_connection():
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
 
 def init_db():
     conn = get_connection()
     c = conn.cursor()
-
-    # Core person record — minimal, just identity
     c.execute("""
     CREATE TABLE IF NOT EXISTS people (
         id       INTEGER PRIMARY KEY AUTOINCREMENT,
         name     TEXT NOT NULL,
-        added_at TEXT DEFAULT (datetime('now'))
+        added_at TEXT DEFAULT (datetime('now','localtime'))
     )""")
-
-    # Every piece of info is a "field" row
-    # field_type: instagram | snapchat | twitter | linkedin | pinterest |
-    #             facebook | tiktok | youtube | telegram | discord | reddit |
-    #             threads | bereal | phone | email | whatsapp | dob | gender |
-    #             nickname | school | college | workplace | jobtitle | github |
-    #             website | location | address | note | tag | custom
     c.execute("""
     CREATE TABLE IF NOT EXISTS fields (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         person_id  INTEGER NOT NULL,
         field_type TEXT NOT NULL,
-        label      TEXT,        -- optional custom label e.g. "main account"
+        label      TEXT,
         value      TEXT NOT NULL,
-        added_at   TEXT DEFAULT (datetime('now')),
+        added_at   TEXT DEFAULT (datetime('now','localtime')),
         FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
     )""")
-
-    # Media files (images, videos, zips, repos)
     c.execute("""
     CREATE TABLE IF NOT EXISTS media (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         person_id   INTEGER NOT NULL,
-        media_type  TEXT NOT NULL,  -- photo | video | screenshot | repo_zip | repo_url
+        media_type  TEXT NOT NULL,
+        path        TEXT,
         filename    TEXT,
-        path        TEXT,           -- local file path or URL
         caption     TEXT,
-        added_at    TEXT DEFAULT (datetime('now')),
+        added_at    TEXT DEFAULT (datetime('now','localtime')),
         FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
     )""")
-
     conn.commit()
     conn.close()
 
@@ -66,9 +55,9 @@ def get_all_people():
     c = conn.cursor()
     c.execute("""
         SELECT p.id, p.name, p.added_at,
-               (SELECT value FROM fields WHERE person_id=p.id AND field_type='instagram' LIMIT 1) as insta,
-               (SELECT path  FROM media  WHERE person_id=p.id AND media_type='profile_pic' LIMIT 1) as pic,
-               (SELECT value FROM fields WHERE person_id=p.id AND field_type='tag' LIMIT 1) as tag
+               (SELECT value FROM fields WHERE person_id=p.id AND field_type='instagram' LIMIT 1),
+               (SELECT path  FROM media  WHERE person_id=p.id AND media_type='profile_pic' LIMIT 1),
+               (SELECT value FROM fields WHERE person_id=p.id AND field_type='tag' LIMIT 1)
         FROM people p ORDER BY p.id DESC
     """)
     rows = c.fetchall(); conn.close()
@@ -132,8 +121,8 @@ def add_media(person_id: int, media_type: str, path: str, filename: str = None, 
     conn = get_connection()
     c = conn.cursor()
     c.execute(
-        "INSERT INTO media (person_id, media_type, filename, path, caption) VALUES (?,?,?,?,?)",
-        (person_id, media_type, filename, path, caption)
+        "INSERT INTO media (person_id, media_type, path, filename, caption) VALUES (?,?,?,?,?)",
+        (person_id, media_type, path, filename, caption)
     )
     mid = c.lastrowid
     conn.commit(); conn.close()
@@ -153,4 +142,10 @@ def delete_media(media_id: int):
     conn = get_connection()
     c = conn.cursor()
     c.execute("DELETE FROM media WHERE id=?", (media_id,))
+    conn.commit(); conn.close()
+
+def rename_media(media_id: int, filename: str):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE media SET filename=? WHERE id=?", (filename, media_id))
     conn.commit(); conn.close()
