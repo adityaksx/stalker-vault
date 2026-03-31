@@ -94,7 +94,8 @@ function render() {
 // ── Hero ──
 function renderHero() {
   const d = personData;
-  const pic = d.media?.find(m => m.type === 'photo');
+  const pic = d.media?.find(m => m.type === 'profile_pic')
+         || d.media?.find(m => m.type === 'photo');
   const avatar = pic
     ? `<img class="person-hero-avatar" src="${pic.path}" alt="${d.name}">`
     : `<div class="hero-placeholder">👤</div>`;
