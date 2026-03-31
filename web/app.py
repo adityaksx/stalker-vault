@@ -2,6 +2,7 @@ import os, sys, json, shutil, uuid
 from pathlib import Path
 from typing import Optional
 import re
+import httpx
 
 from fastapi import FastAPI, Form, File, UploadFile, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -173,3 +174,95 @@ async def api_rename_media(mid: int, filename: str = Form(...)):
     from database.db import rename_media
     rename_media(mid, filename)
     return {"ok": True}
+
+# ── Instagram Snapshots ──
+
+@app.get("/api/people/{pid}/ig-snapshots")
+def api_ig_snapshots(pid: int):
+    from database.db import get_ig_snapshots
+    rows = get_ig_snapshots(pid)
+    return {"snapshots": [
+        {"id":r[0],"ig_username":r[1],"list_type":r[2],"label":r[3],"imported_at":r[4],"count":r[5]}
+        for r in rows
+    ]}
+
+@app.get("/api/ig-snapshots/{sid}/entries")
+def api_ig_entries(sid: int):
+    from database.db import get_ig_entries
+    rows = get_ig_entries(sid)
+    return {"entries": [
+        {"id":r[0],"username":r[1],"full_name":r[2],"profile_pic_url":r[3],"local_pic_path":r[4]}
+        for r in rows
+    ]}
+
+@app.post("/api/people/{pid}/ig-snapshots")
+async def api_ig_import(
+    pid: int,
+    ig_username: str = Form(...),
+    list_type: str = Form(...),
+    label: Optional[str] = Form(default=None),
+    csv_data: str = Form(...),
+):
+    from database.db import create_ig_snapshot, add_ig_entry, get_person
+    import csv, io
+
+    person_row  = get_person(pid)
+    person_name = person_row[1] if person_row else f"person_{pid}"
+    safe_name   = safe_folder_name(person_name)
+
+    # CSV columns: followed_by_viewer;full_name;id;is_verified;profile_pic_url;requested_by_viewer;username
+    reader  = csv.DictReader(io.StringIO(csv_data), delimiter=';')
+    entries = []
+    for row in reader:
+        uname = (row.get('username') or '').strip().strip('"')
+        fname = (row.get('full_name') or '').strip().strip('"')
+        pic   = (row.get('profile_pic_url') or '').strip().strip('"')
+        if uname:
+            entries.append((uname, fname, pic))
+
+    if not entries:
+        raise HTTPException(400, "No valid entries in CSV")
+
+    sid     = create_ig_snapshot(pid, ig_username, list_type, label)
+    pic_dir = STORAGE_DIR / safe_name / "ig_pics"
+    pic_dir.mkdir(parents=True, exist_ok=True)
+
+    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+        for (uname, fname, pic_url) in entries:
+            local_path = None
+            if pic_url:
+                try:
+                    filename   = f"{uname}_{uuid.uuid4().hex[:8]}.jpg"
+                    dest       = pic_dir / filename
+                    r          = await client.get(pic_url)
+                    if r.status_code == 200:
+                        dest.write_bytes(r.content)
+                        local_path = f"/storage/{safe_name}/ig_pics/{filename}"
+                except Exception:
+                    pass
+            add_ig_entry(sid, uname, fname, pic_url, local_path)
+
+    return {"ok": True, "snapshot_id": sid, "count": len(entries)}
+
+@app.delete("/api/ig-snapshots/{sid}")
+def api_ig_delete_snapshot(sid: int):
+    from database.db import delete_ig_snapshot
+    delete_ig_snapshot(sid)
+    return {"ok": True}
+
+@app.get("/api/ig-snapshots/diff")
+def api_ig_diff(old_sid: int, new_sid: int):
+    from database.db import get_ig_entries
+    old_map = {e[1]: e for e in get_ig_entries(old_sid)}
+    new_map = {e[1]: e for e in get_ig_entries(new_sid)}
+    old_set, new_set = set(old_map), set(new_map)
+
+    def fmt(e): return {"username":e[1],"full_name":e[2],"profile_pic_url":e[3],"local_pic_path":e[4]}
+
+    return {
+        "unfollowed": sorted([fmt(old_map[u]) for u in old_set - new_set], key=lambda x: x["username"]),
+        "new":        sorted([fmt(new_map[u]) for u in new_set - old_set], key=lambda x: x["username"]),
+        "retained":   len(old_set & new_set),
+        "old_count":  len(old_set),
+        "new_count":  len(new_set),
+    }
