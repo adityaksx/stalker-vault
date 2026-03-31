@@ -514,3 +514,29 @@ hr { border: none; border-top: 1px solid var(--border); margin: 2.5rem 0; }
 
 /* Lightbox path bar hover */
 #lb-local-path:hover { background: var(--surface) !important; }
+
+/* ── Instagram Tracker ── */
+.ig-import-panel { background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:1.2rem;margin-top:1rem; }
+.ig-import-panel h3 { font-size:0.9rem;color:var(--muted2);margin-bottom:0.8rem;font-weight:600; }
+.ig-form-row { display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.75rem; }
+@media(max-width:640px){ .ig-form-row { grid-template-columns:1fr; } }
+.ig-tabs { display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:1rem; }
+.ig-tab { background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:0.4rem 0.9rem;font-size:0.82rem;color:var(--muted2);cursor:pointer;transition:all 0.15s; }
+.ig-tab.active,.ig-tab:hover { background:var(--accent3);color:#fff;border-color:var(--accent3); }
+.ig-snapshots-list { display:flex;flex-direction:column;gap:0.7rem; }
+.ig-snapshot-card { background:var(--surface2);border:1px solid var(--border2);border-radius:10px;overflow:hidden; }
+.ig-snap-header { display:flex;justify-content:space-between;align-items:center;padding:0.7rem 1rem; }
+.ig-snap-label { font-weight:600;font-size:0.88rem;color:var(--text);display:block; }
+.ig-snap-meta { font-size:0.72rem;color:var(--muted);margin-top:0.15rem;display:block; }
+.ig-entries-wrap { border-top:1px solid var(--border2);padding:0.75rem 1rem; }
+.ig-entries-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:0.6rem; }
+.ig-entry-card { background:var(--surface);border:1px solid var(--border2);border-radius:10px;padding:0.7rem;display:flex;align-items:center;gap:0.6rem; }
+.ig-avatar { width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0; }
+.ig-avatar-placeholder { width:40px;height:40px;border-radius:50%;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0; }
+.ig-entry-info { min-width:0; }
+.ig-entry-username { font-size:0.78rem;font-weight:600;color:var(--accent3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+.ig-entry-name { font-size:0.7rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+.ig-diff-controls { display:grid;grid-template-columns:1fr 1fr auto;gap:0.75rem;align-items:flex-end; }
+@media(max-width:640px){ .ig-diff-controls { grid-template-columns:1fr; } }
+.ig-diff-summary { display:flex;gap:1rem;flex-wrap:wrap;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:0.75rem 1rem;font-size:0.84rem; }
+.ig-ok-badge { background:rgba(74,222,128,0.1);border:1px solid #4ade80;border-radius:8px;padding:0.6rem 1rem;color:#4ade80;font-weight:600;margin-top:0.5rem; }
