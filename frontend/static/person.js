@@ -430,4 +430,192 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') document.getElementById('lightbox').classList.remove('open');
 });
 
-load();
+// ════════ Instagram Tracker ════════
+let igSnapshots = [];
+
+async function loadIg() {
+  const res = await fetch(`${API}/api/people/${pid}/ig-snapshots`);
+  igSnapshots = (await res.json()).snapshots || [];
+  renderIgSection();
+}
+
+function renderIgSection() {
+  const wrap = document.getElementById('ig-section');
+  if (!wrap) return;
+  const followers = igSnapshots.filter(s => s.list_type === 'followers');
+  const following = igSnapshots.filter(s => s.list_type === 'following');
+
+  wrap.innerHTML = `
+  <div class="info-section">
+    <h2>📊 Instagram Tracker</h2>
+    <div class="ig-import-panel">
+      <h3>➕ Import Snapshot</h3>
+      <form id="ig-import-form">
+        <div class="ig-form-row">
+          <div class="form-group">
+            <label>IG Username (whose list)</label>
+            <input type="text" name="ig_username" placeholder="_vaishnnavvi_" required/>
+          </div>
+          <div class="form-group">
+            <label>List Type</label>
+            <select name="list_type">
+              <option value="followers">👥 Followers</option>
+              <option value="following">➡️ Following</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Label <span style="color:var(--muted);font-size:0.7rem">(optional)</span></label>
+            <input type="text" name="label" placeholder="Week 1, April 2026"/>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>CSV File <span style="color:var(--muted);font-size:0.7rem">(_Followers.csv or _Following.csv)</span></label>
+          <label class="file-label">📂 Choose CSV
+            <input type="file" id="ig-csv-input" accept=".csv,.txt" required/>
+          </label>
+          <div id="ig-csv-preview" style="font-size:0.75rem;color:var(--muted2);margin-top:0.3rem"></div>
+        </div>
+        <div id="ig-import-bar" class="upload-bar"></div>
+        <button type="submit" class="btn btn-primary" id="ig-import-btn">📥 Import & Save</button>
+      </form>
+    </div>
+
+    <div class="ig-tabs" style="margin-top:1.5rem">
+      <button class="ig-tab active" onclick="switchIgTab('followers',this)">👥 Followers (${followers.length})</button>
+      <button class="ig-tab" onclick="switchIgTab('following',this)">➡️ Following (${following.length})</button>
+      <button class="ig-tab" onclick="switchIgTab('diff',this)">🔍 Diff</button>
+    </div>
+    <div id="ig-tab-followers">${renderSnapList(followers)}</div>
+    <div id="ig-tab-following" style="display:none">${renderSnapList(following)}</div>
+    <div id="ig-tab-diff" style="display:none">${renderDiffPanel()}</div>
+  </div>`;
+
+  document.getElementById('ig-csv-input').addEventListener('change', e => {
+    const f = e.target.files[0];
+    document.getElementById('ig-csv-preview').textContent = f ? `${f.name} (${(f.size/1024).toFixed(1)} KB)` : '';
+  });
+  document.getElementById('ig-import-form').addEventListener('submit', igImport);
+}
+
+function renderSnapList(snaps) {
+  if (!snaps.length) return `<div class="section-empty">No snapshots yet.</div>`;
+  return `<div class="ig-snapshots-list">${snaps.map(s => `
+    <div class="ig-snapshot-card" id="igsnap-${s.id}">
+      <div class="ig-snap-header">
+        <div>
+          <span class="ig-snap-label">${esc(s.label||s.imported_at)}</span>
+          <span class="ig-snap-meta">@${esc(s.ig_username)} · ${s.count} people · ${fmtDt(s.imported_at)}</span>
+        </div>
+        <div style="display:flex;gap:0.4rem">
+          <button class="btn btn-secondary btn-sm" onclick="viewSnapshot(${s.id})">👁 View</button>
+          <button class="field-del" onclick="deleteSnapshot(${s.id})">✕</button>
+        </div>
+      </div>
+      <div class="ig-entries-wrap" id="igentries-${s.id}" style="display:none"></div>
+    </div>`).join('')}</div>`;
+}
+
+function renderDiffPanel() {
+  if (igSnapshots.length < 2) return `<div class="section-empty">Import at least 2 snapshots to compare.</div>`;
+  const opts = igSnapshots.map(s =>
+    `<option value="${s.id}">[${s.list_type}] ${esc(s.label||s.imported_at)} @${esc(s.ig_username)} (${s.count})</option>`).join('');
+  return `<div class="ig-diff-controls">
+    <div class="form-group"><label>Old Snapshot</label><select id="diff-old">${opts}</select></div>
+    <div class="form-group"><label>New Snapshot</label><select id="diff-new">${opts}</select></div>
+    <button class="btn btn-primary" onclick="runDiff()">🔍 Compare</button>
+  </div><div id="diff-result" style="margin-top:1rem"></div>`;
+}
+
+function switchIgTab(name, btn) {
+  document.querySelectorAll('.ig-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  ['followers','following','diff'].forEach(t => {
+    const el = document.getElementById(`ig-tab-${t}`);
+    if (el) el.style.display = t === name ? 'block' : 'none';
+  });
+}
+
+async function viewSnapshot(sid) {
+  const wrap = document.getElementById(`igentries-${sid}`);
+  if (wrap.style.display === 'block') { wrap.style.display = 'none'; return; }
+  wrap.innerHTML = `<div style="color:var(--muted);padding:0.5rem">Loading…</div>`;
+  wrap.style.display = 'block';
+  const data = await (await fetch(`${API}/api/ig-snapshots/${sid}/entries`)).json();
+  const entries = data.entries || [];
+  wrap.innerHTML = entries.length
+    ? `<div class="ig-entries-grid">${entries.map(igCard).join('')}</div>`
+    : `<div class="section-empty">No entries.</div>`;
+}
+
+function igCard(e) {
+  const src = e.local_pic_path || e.profile_pic_url || '';
+  const av  = src
+    ? `<img src="${esc(src)}" class="ig-avatar" onerror="this.outerHTML='<div class=ig-avatar-placeholder>👤</div>'">`
+    : `<div class="ig-avatar-placeholder">👤</div>`;
+  return `<div class="ig-entry-card">${av}
+    <div class="ig-entry-info">
+      <div class="ig-entry-username"><a href="https://instagram.com/${esc(e.username)}" target="_blank">@${esc(e.username)} ↗</a></div>
+      <div class="ig-entry-name">${esc(e.full_name||'')}</div>
+    </div></div>`;
+}
+
+async function deleteSnapshot(sid) {
+  if (!confirm('Delete this snapshot?')) return;
+  await fetch(`${API}/api/ig-snapshots/${sid}`, {method:'DELETE'});
+  showToast('Deleted'); await loadIg();
+}
+
+async function igImport(e) {
+  e.preventDefault();
+  const form = e.target;
+  const btn  = document.getElementById('ig-import-btn');
+  const bar  = document.getElementById('ig-import-bar');
+  const file = document.getElementById('ig-csv-input').files[0];
+  if (!file) return showToast('Choose a CSV','error');
+  btn.disabled = true; btn.textContent = 'Importing…'; bar.style.width = '40%';
+  const csvText = await file.text();
+  const fd = new FormData();
+  fd.append('ig_username', form.ig_username.value.trim());
+  fd.append('list_type',   form.list_type.value);
+  fd.append('label',       form.label.value.trim());
+  fd.append('csv_data',    csvText);
+  const data = await (await fetch(`${API}/api/people/${pid}/ig-snapshots`, {method:'POST',body:fd})).json();
+  bar.style.width = '100%'; setTimeout(()=>{ bar.style.width='0'; },600);
+  if (data.ok) { showToast(`✅ Imported ${data.count} entries`); form.reset(); await loadIg(); }
+  else showToast('Import failed','error');
+  btn.disabled = false; btn.textContent = '📥 Import & Save';
+}
+
+async function runDiff() {
+  const oldSid = document.getElementById('diff-old').value;
+  const newSid = document.getElementById('diff-new').value;
+  if (oldSid === newSid) return showToast('Pick two different snapshots','error');
+  const data = await (await fetch(`${API}/api/ig-snapshots/diff?old_sid=${oldSid}&new_sid=${newSid}`)).json();
+  const oldS = igSnapshots.find(s=>s.id==oldSid);
+  const newS = igSnapshots.find(s=>s.id==newSid);
+  document.getElementById('diff-result').innerHTML = `
+    <div class="ig-diff-summary">
+      <span>📊 Old: <b>${data.old_count}</b></span>
+      <span>📊 New: <b>${data.new_count}</b></span>
+      <span style="color:#f87171">😞 Unfollowed: <b>${data.unfollowed.length}</b></span>
+      <span style="color:#4ade80">🎉 New: <b>${data.new.length}</b></span>
+      <span style="color:var(--muted2)">↔️ Same: <b>${data.retained}</b></span>
+    </div>
+    ${data.unfollowed.length ? `
+    <div class="info-section" style="margin-top:1rem">
+      <h3 style="color:#f87171">😞 Unfollowed (${data.unfollowed.length})</h3>
+      <p style="font-size:0.75rem;color:var(--muted);margin-bottom:0.75rem">
+        Comparing <b>${esc(oldS?.label||oldS?.imported_at)}</b> → <b>${esc(newS?.label||newS?.imported_at)}</b>
+      </p>
+      <div class="ig-entries-grid">${data.unfollowed.map(igCard).join('')}</div>
+    </div>` : '<div style="padding:1rem;color:#4ade80;font-weight:600">✅ Nobody unfollowed!</div>'}
+    ${data.new.length ? `
+    <div class="info-section" style="margin-top:1rem">
+      <h3 style="color:#4ade80">🎉 New (${data.new.length})</h3>
+      <div class="ig-entries-grid">${data.new.map(igCard).join('')}</div>
+    </div>` : ''}`;
+}
+
+// patch load() to also load IG data
+const _origLoad = load;
+async function load() { await _origLoad(); await loadIg(); }
