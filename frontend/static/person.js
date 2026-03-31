@@ -72,7 +72,7 @@ function esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-async function load() {
+async function loadPerson() {
   const res = await fetch(`${API}/api/people/${pid}`);
   if (!res.ok) {
     document.querySelector('.page').innerHTML = `
@@ -259,7 +259,7 @@ document.getElementById('add-field-form').addEventListener('submit', async e => 
   const fd = new FormData(e.target);
   const res = await fetch(`${API}/api/people/${pid}/fields`, { method: 'POST', body: fd });
   const data = await res.json();
-  if (data.ok) { showToast('Field added ✓'); e.target.reset(); await load(); }
+  if (data.ok) { showToast('Field added ✓'); e.target.reset(); await init(); }
   else showToast('Error', 'error');
 });
 
@@ -332,7 +332,7 @@ document.getElementById('add-media-form').addEventListener('submit', async e => 
     if (cap) fd.append('caption', cap);
     const res = await fetch(`${API}/api/people/${pid}/media`, { method:'POST', body:fd });
     const data = await res.json();
-    if (data.ok) { showToast('Saved ✓'); e.target.reset(); await load(); }
+    if (data.ok) { showToast('Saved ✓'); e.target.reset(); await init(); }
     else showToast('Error', 'error');
     btn.disabled = false; btn.textContent = 'Upload';
     return;
@@ -362,19 +362,19 @@ document.getElementById('add-media-form').addEventListener('submit', async e => 
   queuedFiles = []; multiPreview.innerHTML = '';
   e.target.reset();
   btn.disabled = false; btn.textContent = 'Upload';
-  await load();
+  await init();
 });
 
 // ── Delete ──
 async function deleteField(fid) {
   if (!confirm('Remove this field?')) return;
   await fetch(`${API}/api/fields/${fid}`, { method: 'DELETE' });
-  showToast('Removed'); await load();
+  showToast('Removed'); await init();
 }
 async function deleteMedia(mid) {
   if (!confirm('Remove this media?')) return;
   await fetch(`${API}/api/media/${mid}`, { method: 'DELETE' });
-  showToast('Removed'); await load();
+  showToast('Removed'); await init();
 }
 
 async function editName() {
@@ -382,7 +382,7 @@ async function editName() {
   if (!newName || newName === personData.name) return;
   const fd = new FormData(); fd.append('name', newName);
   await fetch(`${API}/api/people/${pid}`, { method: 'PATCH', body: fd });
-  showToast('Renamed ✓'); await load();
+  showToast('Renamed ✓'); await init();
 }
 
 async function renameMedia(mid, current) {
@@ -391,7 +391,7 @@ async function renameMedia(mid, current) {
   const fd = new FormData(); fd.append('filename', newName);
   const res = await fetch(`${API}/api/media/${mid}/rename`, { method: 'PATCH', body: fd });
   const data = await res.json();
-  if (data.ok) { showToast('Renamed ✓'); await load(); }
+  if (data.ok) { showToast('Renamed ✓'); await init(); }
   else showToast('Error', 'error');
 }
 
@@ -616,6 +616,10 @@ async function runDiff() {
     </div>` : ''}`;
 }
 
-// patch load() to also load IG data
-const _origLoad = load;
-async function load() { await _origLoad(); await loadIg(); }
+// ════════ Entry Point ════════
+async function init() {
+  await loadPerson();
+  await loadIg();
+}
+
+init();
