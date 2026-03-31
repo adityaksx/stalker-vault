@@ -54,7 +54,6 @@ const MEDIA_ACCEPT = {
 let personData  = null;
 let queuedFiles = [];
 
-// ── Helpers ──
 function showToast(msg, type = 'success') {
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -73,7 +72,6 @@ function esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-// ── Load ──
 async function load() {
   const res = await fetch(`${API}/api/people/${pid}`);
   if (!res.ok) {
@@ -88,7 +86,6 @@ async function load() {
 
 function render() { renderHero(); renderFields(); renderMedia(); }
 
-// ── Hero ──
 function renderHero() {
   const d   = personData;
   const pic = d.media?.find(m => m.type === 'profile_pic')
@@ -118,7 +115,6 @@ function renderHero() {
     </div>`;
 }
 
-// ── Fields ──
 function renderFields() {
   const fields = personData.fields || [];
   if (!fields.length) {
@@ -151,7 +147,6 @@ function renderFields() {
       </div>`).join('');
 }
 
-// ── Media ──
 function renderMedia() {
   const media  = personData.media || [];
   if (!media.length) {
@@ -173,7 +168,7 @@ function renderMedia() {
         ${photos.map(m => `
           <div class="media-item">
             <img class="screenshot-thumb" src="${m.path}"
-              onclick="openLightbox('${m.path}')"
+              onclick="openLightbox('${m.path}', '${esc(m.filename||'')}', '${esc(m.local_path||'')}')"
               onerror="this.style.opacity='0.15'">
             <div class="media-caption">
               <span class="fname-badge" title="${esc(m.filename||'')}">${esc(m.filename||'')}</span>
@@ -290,7 +285,6 @@ typeSelect.addEventListener('change', () => {
   multiPreview.innerHTML = '';
 });
 
-// ── File picker → preview ──
 fileInput.addEventListener('change', () => {
   queuedFiles = Array.from(fileInput.files);
   renderMultiPreview();
@@ -320,7 +314,7 @@ function renderMultiPreview() {
   });
 }
 
-// ── Upload (multi-file) ──
+// ── Upload ──
 document.getElementById('add-media-form').addEventListener('submit', async e => {
   e.preventDefault();
   const btn = document.getElementById('upload-btn');
@@ -383,7 +377,6 @@ async function deleteMedia(mid) {
   showToast('Removed'); await load();
 }
 
-// ── Rename person ──
 async function editName() {
   const newName = prompt('Rename:', personData.name);
   if (!newName || newName === personData.name) return;
@@ -392,7 +385,6 @@ async function editName() {
   showToast('Renamed ✓'); await load();
 }
 
-// ── Rename media ──
 async function renameMedia(mid, current) {
   const newName = prompt('Rename file (keep extension):', current);
   if (!newName || newName === current) return;
@@ -403,7 +395,6 @@ async function renameMedia(mid, current) {
   else showToast('Error', 'error');
 }
 
-// ── Delete person ──
 async function confirmDelete() {
   if (!confirm('Delete this person permanently?')) return;
   await fetch(`${API}/api/people/${pid}`, { method: 'DELETE' });
@@ -411,13 +402,25 @@ async function confirmDelete() {
   setTimeout(() => location.href = '/', 600);
 }
 
-// ── Lightbox ──
-function openLightbox(src) {
+// ── Lightbox with local path ──
+function openLightbox(src, filename, localPath) {
   document.getElementById('lightbox-img').src = src;
+  document.getElementById('lb-filename').textContent = filename || '';
+
+  const pathEl = document.getElementById('lb-local-path');
+  if (localPath) {
+    pathEl.textContent = localPath;
+    pathEl.parentElement.style.display = 'block';
+  } else {
+    pathEl.parentElement.style.display = 'none';
+  }
+
   document.getElementById('lightbox').classList.add('open');
 }
+
 document.getElementById('lightbox').addEventListener('click', function(e) {
-  if (e.target !== document.getElementById('lightbox-img'))
+  const inner = document.getElementById('lb-inner');
+  if (!inner.contains(e.target))
     this.classList.remove('open');
 });
 document.getElementById('lb-close').addEventListener('click', () => {
