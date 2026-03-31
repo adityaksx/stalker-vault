@@ -125,7 +125,7 @@ async def api_add_media(
     if media_type == "repo_url":
         if not repo_url:
             raise HTTPException(400, "repo_url is required for repo_url type")
-        mid = add_media(pid, "repo_url", repo_url, caption=caption)
+        mid = add_media(pid, "repo_url", repo_url, filename=None, caption=caption)
         return {"ok": True, "id": mid}
 
     # File upload
@@ -150,7 +150,7 @@ async def api_add_media(
     with dest.open("wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    mid = add_media(pid, media_type, file.filename, url, caption)
+    mid = add_media(pid, media_type, url, file.filename, caption)
     return {"ok": True, "id": mid, "path": url}
 
 @app.delete("/api/media/{mid}")
