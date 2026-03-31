@@ -511,3 +511,6 @@ hr { border: none; border-top: 1px solid var(--border); margin: 2.5rem 0; }
   .person-hero { flex-direction: column; align-items: center; text-align: center; padding: 1.5rem; }
   .hero-actions { justify-content: center; }
 }
+
+/* Lightbox path bar hover */
+#lb-local-path:hover { background: var(--surface) !important; }
