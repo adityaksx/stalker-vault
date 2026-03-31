@@ -36,6 +36,7 @@ def init_db():
         filename    TEXT,
         caption     TEXT,
         added_at    TEXT DEFAULT (datetime('now','localtime')),
+        local_path  TEXT,
         FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
     )""")
     conn.commit()
@@ -117,12 +118,13 @@ def update_field(field_id: int, value: str, label: str = None):
     conn.commit(); conn.close()
 
 # ── Media ──
-def add_media(person_id: int, media_type: str, path: str, filename: str = None, caption: str = None) -> int:
+def add_media(person_id: int, media_type: str, path: str,
+              filename: str = None, caption: str = None, local_path: str = None) -> int:
     conn = get_connection()
     c = conn.cursor()
     c.execute(
-        "INSERT INTO media (person_id, media_type, path, filename, caption) VALUES (?,?,?,?,?)",
-        (person_id, media_type, path, filename, caption)
+        "INSERT INTO media (person_id, media_type, path, filename, caption, local_path) VALUES (?,?,?,?,?,?)",
+        (person_id, media_type, path, filename, caption, local_path)
     )
     mid = c.lastrowid
     conn.commit(); conn.close()
@@ -132,7 +134,8 @@ def get_media(person_id: int):
     conn = get_connection()
     c = conn.cursor()
     c.execute(
-        "SELECT id, media_type, filename, path, caption, added_at FROM media WHERE person_id=? ORDER BY added_at DESC",
+        """SELECT id, media_type, filename, path, caption, added_at, local_path
+           FROM media WHERE person_id=? ORDER BY added_at DESC""",
         (person_id,)
     )
     rows = c.fetchall(); conn.close()
