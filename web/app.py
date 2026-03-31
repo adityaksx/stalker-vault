@@ -132,7 +132,7 @@ async def api_add_media(
     ext  = Path(file.filename).suffix.lower()
     name = f"{uuid.uuid4().hex}{ext}"
 
-    if media_type in ("photo", "screenshot"):
+    if media_type in ("photo", "screenshot", "profile_pic"):
         dest = IMAGES_DIR / name
         url  = f"/storage/images/{name}"
     elif media_type == "video":
