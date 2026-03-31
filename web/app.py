@@ -1,6 +1,7 @@
 import os, sys, json, shutil, uuid
 from pathlib import Path
 from typing import Optional
+import re
 
 from fastapi import FastAPI, Form, File, UploadFile, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -37,11 +38,18 @@ TYPE_FOLDER = {
     "other":       "files",
 }
 
-def get_person_dir(pid: int, media_type: str) -> tuple[Path, str]:
-    folder = TYPE_FOLDER.get(media_type, "files")
-    d = STORAGE_DIR / f"person_{pid}" / folder
+def safe_folder_name(name: str) -> str:
+    # Remove characters not safe for folder names, collapse spaces
+    s = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', name)
+    s = re.sub(r'\s+', '_', s.strip())
+    return s or "unknown"
+
+def get_person_dir(pid: int, person_name: str, media_type: str) -> tuple[Path, str]:
+    folder      = TYPE_FOLDER.get(media_type, "files")
+    safe_name   = safe_folder_name(person_name)
+    d = STORAGE_DIR / safe_name / folder
     d.mkdir(parents=True, exist_ok=True)
-    return d, folder
+    return d, folder, safe_name
 
 # ── Pages ──
 @app.get("/", response_class=HTMLResponse)
@@ -120,7 +128,7 @@ async def api_add_media(
     repo_url:   Optional[str]        = Form(default=None),
     file:       Optional[UploadFile] = File(default=None),
 ):
-    from database.db import add_media
+    from database.db import add_media, get_person
 
     if media_type == "repo_url":
         if not repo_url:
@@ -132,21 +140,24 @@ async def api_add_media(
     if not file or not file.filename:
         raise HTTPException(400, "No file provided")
 
-    original_name = file.filename                      # e.g. IMG_20250204_1917.jpg
-    ext           = Path(original_name).suffix.lower()
-    uuid_name     = f"{uuid.uuid4().hex}{ext}"          # unique on-disk name
+    # Get person name for folder
+    person_row  = get_person(pid)
+    person_name = person_row[1] if person_row else f"person_{pid}"
 
-    dest_dir, _   = get_person_dir(pid, media_type)
-    dest          = dest_dir / uuid_name
-    url           = f"/storage/person_{pid}/{TYPE_FOLDER.get(media_type,'files')}/{uuid_name}"
-    local_path    = str(dest.resolve())
+    original_name        = file.filename
+    ext                  = Path(original_name).suffix.lower()
+    uuid_name            = f"{uuid.uuid4().hex}{ext}"
+
+    dest_dir, folder_type, safe_name = get_person_dir(pid, person_name, media_type)
+    dest       = dest_dir / uuid_name
+    url        = f"/storage/{safe_name}/{folder_type}/{uuid_name}"
+
+    # Use forward slashes for local_path so it displays cleanly in UI
+    local_path = str(dest.resolve()).replace("\\", "/")
 
     with dest.open("wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    # filename = original display name shown in UI
-    # path     = web-accessible URL
-    # local_path = absolute disk path
     mid = add_media(pid, media_type, url,
                     filename=original_name, caption=caption, local_path=local_path)
     return {"ok": True, "id": mid, "path": url}
