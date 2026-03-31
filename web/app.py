@@ -114,35 +114,41 @@ def api_delete_field(fid: int):
 @app.post("/api/people/{pid}/media")
 async def api_add_media(
     pid:        int,
-    media_type: str                  = Form(...),
-    caption:    Optional[str]        = Form(default=None),
-    repo_url:   Optional[str]        = Form(default=None),
-    file:       Optional[UploadFile] = File(default=None),
+    media_type: str                        = Form(...),
+    caption:    Optional[str]              = Form(default=None),
+    repo_url:   Optional[str]              = Form(default=None),
+    file:       Optional[UploadFile]       = File(default=None),
 ):
     from database.db import add_media
 
-    # GitHub repo URL (no file)
-    if media_type == "repo_url" and repo_url:
+    # Repo URL — no file needed
+    if media_type == "repo_url":
+        if not repo_url:
+            raise HTTPException(400, "repo_url is required for repo_url type")
         mid = add_media(pid, "repo_url", repo_url, caption=caption)
         return {"ok": True, "id": mid}
 
+    # File upload
     if not file or not file.filename:
         raise HTTPException(400, "No file provided")
 
-    ext  = Path(file.filename).suffix.lower()
-    name = f"{uuid.uuid4().hex}{ext}"
+    # Sanitize filename — remove special chars that cause issues
+    import re, uuid
+    ext       = Path(file.filename).suffix.lower()
+    safe_name = f"{uuid.uuid4().hex}{ext}"   # always use uuid, ignore original name
 
     if media_type in ("photo", "screenshot", "profile_pic"):
-        dest = IMAGES_DIR / name
-        url  = f"/storage/images/{name}"
+        dest = IMAGES_DIR / safe_name
+        url  = f"/storage/images/{safe_name}"
     elif media_type == "video":
-        dest = VIDEOS_DIR / name
-        url  = f"/storage/videos/{name}"
-    else:  # repo_zip, other
-        dest = FILES_DIR / name
-        url  = f"/storage/files/{name}"
+        dest = VIDEOS_DIR / safe_name
+        url  = f"/storage/videos/{safe_name}"
+    else:
+        dest = FILES_DIR / safe_name
+        url  = f"/storage/files/{safe_name}"
 
-    with dest.open("wb") as f: shutil.copyfileobj(file.file, f)
+    with dest.open("wb") as f:
+        shutil.copyfileobj(file.file, f)
 
     mid = add_media(pid, media_type, file.filename, url, caption)
     return {"ok": True, "id": mid, "path": url}
