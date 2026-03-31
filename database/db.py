@@ -152,3 +152,65 @@ def rename_media(media_id: int, filename: str):
     c = conn.cursor()
     c.execute("UPDATE media SET filename=? WHERE id=?", (filename, media_id))
     conn.commit(); conn.close()
+
+# ── Instagram Snapshots ──
+
+def init_ig_tables():
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS ig_snapshots (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        person_id   INTEGER NOT NULL,
+        ig_username TEXT NOT NULL,
+        list_type   TEXT NOT NULL,
+        label       TEXT,
+        imported_at TEXT DEFAULT (datetime('now','localtime')),
+        FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+    )""")
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS ig_entries (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        snapshot_id      INTEGER NOT NULL,
+        username         TEXT NOT NULL,
+        full_name        TEXT,
+        profile_pic_url  TEXT,
+        local_pic_path   TEXT,
+        FOREIGN KEY (snapshot_id) REFERENCES ig_snapshots(id) ON DELETE CASCADE
+    )""")
+    conn.commit()
+    conn.close()
+
+def create_ig_snapshot(person_id, ig_username, list_type, label=None):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("INSERT INTO ig_snapshots (person_id,ig_username,list_type,label) VALUES (?,?,?,?)",
+              (person_id, ig_username, list_type, label))
+    sid = c.lastrowid; conn.commit(); conn.close(); return sid
+
+def add_ig_entry(snapshot_id, username, full_name, profile_pic_url, local_pic_path=None):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("INSERT INTO ig_entries (snapshot_id,username,full_name,profile_pic_url,local_pic_path) VALUES (?,?,?,?,?)",
+              (snapshot_id, username, full_name, profile_pic_url, local_pic_path))
+    eid = c.lastrowid; conn.commit(); conn.close(); return eid
+
+def get_ig_snapshots(person_id):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""SELECT s.id,s.ig_username,s.list_type,s.label,s.imported_at,COUNT(e.id)
+                 FROM ig_snapshots s LEFT JOIN ig_entries e ON e.snapshot_id=s.id
+                 WHERE s.person_id=? GROUP BY s.id ORDER BY s.imported_at DESC""", (person_id,))
+    rows = c.fetchall(); conn.close(); return rows
+
+def get_ig_entries(snapshot_id):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT id,username,full_name,profile_pic_url,local_pic_path FROM ig_entries WHERE snapshot_id=? ORDER BY username ASC", (snapshot_id,))
+    rows = c.fetchall(); conn.close(); return rows
+
+def delete_ig_snapshot(snapshot_id):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM ig_snapshots WHERE id=?", (snapshot_id,))
+    conn.commit(); conn.close()
