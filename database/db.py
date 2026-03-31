@@ -67,7 +67,7 @@ def get_all_people():
     c.execute("""
         SELECT p.id, p.name, p.added_at,
                (SELECT value FROM fields WHERE person_id=p.id AND field_type='instagram' LIMIT 1) as insta,
-               (SELECT path  FROM media  WHERE person_id=p.id AND media_type='photo' LIMIT 1) as pic,
+               (SELECT path  FROM media  WHERE person_id=p.id AND media_type='profile_pic' LIMIT 1) as pic,
                (SELECT value FROM fields WHERE person_id=p.id AND field_type='tag' LIMIT 1) as tag
         FROM people p ORDER BY p.id DESC
     """)
