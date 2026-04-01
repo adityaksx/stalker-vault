@@ -10,6 +10,9 @@ import time
 import io as _io
 import logging
 
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 from PIL import Image
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
