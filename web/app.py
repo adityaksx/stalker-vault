@@ -8,6 +8,8 @@ import asyncio
 import os
 import io as _io
 import logging
+import json
+
 
 from PIL import Image
 from dotenv import load_dotenv
@@ -363,12 +365,13 @@ def check_image_size(data: bytes, username: str) -> bool:
 
 # New Tier 1: Fast Hidden Web API (No login required)
 async def fetch_pfp_api(username: str) -> bytes | None:
-    # Extract cookies from Instaloader session
-    ig_cookies = {}
-    try:
-        ig_cookies = {c.name: c.value for c in _il.context._session.cookies if c.value}
-    except Exception:
-        pass
+    # Use fresh browser session cookies, fall back to Instaloader
+    ig_cookies = _get_browser_cookies()
+    if not ig_cookies:
+        try:
+            ig_cookies = {c.name: c.value for c in _il.context._session.cookies if c.value}
+        except Exception:
+            pass
 
     web_headers = {
         "accept": "*/*",
@@ -376,7 +379,6 @@ async def fetch_pfp_api(username: str) -> bytes | None:
         "x-ig-app-id": "936619743392459",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
-    # Step 2 uses mobile app headers — required for the 1080x1080 endpoint
     mobile_headers = {
         "User-Agent": "Instagram 219.0.0.12.117 Android (28/9; 380dpi; 1080x2061; OnePlus; GM1910; OnePlus7Pro; qcom; en_US; 302733750)",
         "x-ig-app-id": "567067343352427",
@@ -385,7 +387,6 @@ async def fetch_pfp_api(username: str) -> bytes | None:
 
     async with httpx.AsyncClient(cookies=ig_cookies) as client:
         try:
-            # Step 1: Get the user's numeric ID
             r1 = await client.get(
                 f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}",
                 headers=web_headers,
@@ -401,7 +402,6 @@ async def fetch_pfp_api(username: str) -> bytes | None:
                 print(f"[api-nouid] @{username} — could not get user ID")
                 return None
 
-            # Step 2: Fetch real HD (1080x1080) via mobile endpoint
             r2 = await client.get(
                 f"https://i.instagram.com/api/v1/users/{user_id}/info/",
                 headers=mobile_headers,
@@ -414,7 +414,7 @@ async def fetch_pfp_api(username: str) -> bytes | None:
 
             hd_url = r2.json().get("user", {}).get("hd_profile_pic_url_info", {}).get("url")
             if not hd_url:
-                print(f"[api-nourl] @{username} — no hd_profile_pic_url_info in response")
+                print(f"[api-nourl] @{username} — no hd_profile_pic_url_info")
                 return None
 
             img = await client.get(hd_url, timeout=15.0, follow_redirects=True)
@@ -459,7 +459,7 @@ def _playwright_fetch_sync(username: str) -> bytes | None:
 
             page = context.new_page()
             try:
-                page.goto(f"https://www.instagram.com/{username}/", wait_until="networkidle", timeout=20000)
+                page.goto(f"https://www.instagram.com/{username}/", wait_until="domcontentloaded", timeout=15000)
 
                 page_text = page.content()
                 if "This Account is Private" in page_text or "Sorry, this page" in page_text:
@@ -523,3 +523,17 @@ async def fetch_and_save_pfp(username: str, csv_pic_url: str, dest_dir: Path, sa
 
     print(f"[❌ NO HD] @{username} — All tiers failed")
     return None
+
+def _get_browser_cookies() -> dict:
+    """Extract Instagram cookies from saved Playwright browser state."""
+    if STATE_FILE.exists():
+        try:
+            state = json.loads(STATE_FILE.read_text())
+            return {
+                c["name"]: c["value"]
+                for c in state.get("cookies", [])
+                if "instagram.com" in c.get("domain", "") and c.get("value")
+            }
+        except Exception as e:
+            print(f"[cookie-warn] Could not read browser state: {e}")
+    return {}
