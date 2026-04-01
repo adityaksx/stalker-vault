@@ -268,9 +268,6 @@ async def api_ig_import(
     label: Optional[str] = Form(default=None),
     csv_data: str = Form(...),
 ):
-
-    hd_count       = 0
-    rejected_count = 0
     from database.db import create_ig_snapshot, add_ig_entry, get_person
     import csv, io
 
@@ -279,8 +276,9 @@ async def api_ig_import(
     safe_name   = safe_folder_name(person_name)
 
     sample = csv_data[:500]
-    delim = ';' if ';' in sample and ',' not in sample else ','
+    delim  = ';' if ';' in sample and ',' not in sample else ','
     reader = csv.DictReader(io.StringIO(csv_data), delimiter=delim)
+
     entries = []
     for row in reader:
         uname = (row.get('username') or '').strip().strip('"')
@@ -298,28 +296,36 @@ async def api_ig_import(
 
     hd_count       = 0
     rejected_count = 0
+    consecutive_429s = 0
 
-    # per request delay
-    await asyncio.sleep(random.uniform(1.5, 4))
+    for i, (uname, fname, csv_pic_url) in enumerate(entries):
+        # Circuit breaker — pause batch for 5 min after 3 consecutive failures
+        if consecutive_429s >= 3:
+            print(f"[⚠️ RATE LIMITED] 3 consecutive failures — pausing batch for 5 minutes")
+            await asyncio.sleep(300)
+            consecutive_429s = 0
 
-    for i, (uname, fname, pic_url) in enumerate(entries):
-        await asyncio.sleep(random.uniform(1.5, 3.5))
-        if i > 0 and i % 20 == 0:
-            print(f"[pause] {i}/{len(entries)} done — sleeping 10s")
-            await asyncio.sleep(10)
+        # Single delay per user — larger after first 10
+        wait = random.uniform(2, 4) if i < 10 else random.uniform(6, 12)
+        print(f"[rate-limit] waiting {wait:.1f}s before @{uname} ({i+1}/{len(entries)})")
+        await asyncio.sleep(wait)
 
-        local_path, pic_url = await fetch_and_save_pfp(uname, pic_dir)
+        # Fetch — local_path and fetched_url are separate from csv_pic_url
+        local_path, fetched_url = await fetch_and_save_pfp(uname, pic_dir)
 
         if local_path:
             hd_count += 1
+            consecutive_429s = 0
+            save_url = fetched_url  # use the freshly fetched signed URL
         else:
             rejected_count += 1
+            consecutive_429s += 1
+            save_url = csv_pic_url  # fall back to original CSV URL
 
-        add_ig_entry(sid, uname, fname, pic_url, local_path)
+        add_ig_entry(sid, uname, fname, save_url, local_path)
 
     print(f"[import] Done — ✅ HD: {hd_count}  ❌ rejected/skipped: {rejected_count}  Total: {len(entries)}")
     return {"ok": True, "snapshot_id": sid, "count": len(entries)}
-
 
 @app.get("/api/ig-snapshots/diff")
 def api_ig_diff(old_sid: int, new_sid: int):
