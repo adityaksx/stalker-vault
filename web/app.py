@@ -366,26 +366,40 @@ async def fetch_pfp_api(username: str) -> bytes | None:
     headers = {
         "accept": "*/*",
         "accept-language": "en-US,en;q=0.9",
-        "x-ig-app-id": "936619743392459",  # Instagram's internal Web App ID
+        "x-ig-app-id": "936619743392459",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
 
-    async with httpx.AsyncClient() as client:
+    # Extract cookies from Instaloader session
+    ig_cookies = {}
+    try:
+        ig_cookies = {c.name: c.value for c in _il.context._session.cookies if c.value}
+    except Exception:
+        pass
+
+    async with httpx.AsyncClient(cookies=ig_cookies) as client:
         try:
             response = await client.get(url, headers=headers, timeout=10.0)
+            print(f"[api-status] @{username} — HTTP {response.status_code}")
             if response.status_code == 200:
                 data = response.json()
-                hd_url = data.get("data", {}).get("user", {}).get("hd_profile_pic_url_info", {}).get("url")
-
+                user = data.get("data", {}).get("user", {})
+                if not user:
+                    print(f"[api-empty] @{username} — no user in response")
+                    return None
+                hd_url = (
+                    user.get("hd_profile_pic_url_info", {}).get("url")
+                    or user.get("profile_pic_url_hd")
+                    or user.get("profile_pic_url")
+                )
                 if hd_url:
-                    img_response = await client.get(hd_url, timeout=15.0)
+                    img_response = await client.get(hd_url, timeout=15.0, follow_redirects=True)
                     if img_response.status_code == 200 and check_image_size(img_response.content, username):
                         return img_response.content
             else:
-                logging.warning(f"[api-fail] @{username} — Status: {response.status_code}")
+                print(f"[api-fail] @{username} — Status: {response.status_code}")
         except Exception as e:
-            logging.error(f"[api-error] @{username} — {str(e)}")
-
+            print(f"[api-error] @{username} — {str(e)}")
     return None
 
 # Runs in a ThreadPoolExecutor — completely isolated from asyncio loop
@@ -411,20 +425,37 @@ def _playwright_fetch_sync(username: str) -> bytes | None:
 
             page = context.new_page()
             try:
-                page.goto(f"https://www.instagram.com/{username}/", wait_until="domcontentloaded", timeout=15000)
-                img_element = page.wait_for_selector('header img', timeout=8000)
-                if img_element:
-                    hd_url = img_element.get_attribute('src')
-                    print(f"[playwright-url] @{username} — {hd_url[:80] if hd_url else 'None'}")
-                    if hd_url and "150x150" not in hd_url:
-                        # ✅ Download using the browser's own session — not httpx
-                        img_response = page.request.get(hd_url)
-                        if img_response.ok:
-                            data = img_response.body()
-                            if check_image_size(data, username):
-                                return data
-                        else:
-                            print(f"[playwright-img-fail] @{username} — status {img_response.status}")
+                page.goto(f"https://www.instagram.com/{username}/", wait_until="networkidle", timeout=20000)
+
+                img_element = None
+                for sel in ['header img', 'header section img', 'img[alt$="profile picture"]',
+                            'img[data-testid="user-avatar"]']:
+                    try:
+                        img_element = page.wait_for_selector(sel, timeout=3000)
+                        if img_element:
+                            print(f"[playwright-selector] @{username} — matched '{sel}'")
+                            break
+                    except Exception:
+                        continue
+
+                if not img_element:
+                    page.screenshot(path=f"debug_{username}.png")
+                    print(f"[playwright-debug] @{username} — screenshot saved as debug_{username}.png — check it!")
+                    raise Exception("No profile picture selector matched")
+
+                hd_url = img_element.get_attribute('src')
+                print(f"[playwright-url] @{username} — {hd_url[:80] if hd_url else 'None'}")
+                if hd_url and "150x150" not in hd_url:
+                    img_response = page.request.get(hd_url)
+                    if img_response.ok:
+                        data = img_response.body()
+                        if check_image_size(data, username):
+                            return data
+                    else:
+                        print(f"[playwright-img-fail] @{username} — status {img_response.status}")
+
+            except Exception as e:
+                print(f"[playwright-fail] @{username} — {str(e)}")
             except Exception as e:
                 print(f"[playwright-fail] @{username} — {str(e)}")
             finally:
