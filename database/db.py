@@ -6,6 +6,7 @@ DB_PATH = Path(__file__).parent / "vault.db"
 def get_connection():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode=WAL")   # ← add this
     return conn
 
 def init_db():
@@ -210,14 +211,36 @@ def get_ig_entries(snapshot_id):
     c.execute("SELECT id,username,full_name,profile_pic_url,local_pic_path FROM ig_entries WHERE snapshot_id=? ORDER BY username ASC", (snapshot_id,))
     rows = c.fetchall(); conn.close(); return rows
 
-def delete_ig_snapshot(snapshot_id):
+def delete_ig_snapshot(snapshot_id: int):
     conn = get_connection()
     c = conn.cursor()
+    # Fetch local pic paths before cascade delete
+    c.execute("SELECT local_pic_path FROM ig_entries WHERE snapshot_id=?", (snapshot_id,))
+    pic_paths = [r[0] for r in c.fetchall() if r[0]]
     c.execute("DELETE FROM ig_snapshots WHERE id=?", (snapshot_id,))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
+    # Clean files from disk
+    for p in pic_paths:
+        try:
+            Path(p).unlink(missing_ok=True)
+        except Exception:
+            pass
 
 def get_media_by_id(media_id: int):
     conn = get_connection()
+    conn.row_factory = sqlite3.Row   # ← add this
     c = conn.cursor()
     c.execute("SELECT * FROM media WHERE id=?", (media_id,))
-    row = c.fetchone(); conn.close(); return row
+    row = c.fetchone()
+    conn.close()
+    return row
+
+# ADD this new function:
+
+def update_media_path(media_id: int, path: str, local_path: str):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE media SET path=?, local_path=? WHERE id=?", (path, local_path, media_id))
+    conn.commit()
+    conn.close()
