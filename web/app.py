@@ -45,7 +45,7 @@ def safe_folder_name(name: str) -> str:
     s = re.sub(r'\s+', '_', s.strip())
     return s or "unknown"
 
-def get_person_dir(pid: int, person_name: str, media_type: str) -> tuple[Path, str]:
+def get_person_dir(pid: int, person_name: str, media_type: str) -> tuple[Path, str, str]:
     folder      = TYPE_FOLDER.get(media_type, "files")
     safe_name   = safe_folder_name(person_name)
     d = STORAGE_DIR / safe_name / folder
@@ -79,7 +79,13 @@ async def api_create(name: str = Form(...)):
 
 @app.patch("/api/people/{pid}")
 async def api_update_name(pid: int, name: str = Form(...)):
-    from database.db import update_person_name
+    from database.db import update_person_name, get_person
+    row = get_person(pid)
+    if row:
+        old_folder = STORAGE_DIR / safe_folder_name(row[1])
+        new_folder = STORAGE_DIR / safe_folder_name(name)
+        if old_folder.exists() and not new_folder.exists():
+            old_folder.rename(new_folder)
     update_person_name(pid, name)
     return {"ok": True}
 
@@ -184,7 +190,17 @@ def api_delete_media(mid: int):
 
 @app.patch("/api/media/{mid}/rename")
 async def api_rename_media(mid: int, filename: str = Form(...)):
-    from database.db import rename_media
+    from database.db import rename_media, get_media_by_id
+    row = get_media_by_id(mid)
+    if row and row[7]:  # local_path is index 7
+        old_path = Path(row[7])
+        new_path = old_path.parent / filename
+        if old_path.exists() and not new_path.exists():
+            old_path.rename(new_path)
+            # Update local_path and url path too
+            new_url = "/".join(row[3].split("/")[:-1]) + "/" + filename
+            from database.db import update_media_path
+            update_media_path(mid, new_url, str(new_path).replace("\\", "/"))
     rename_media(mid, filename)
     return {"ok": True}
 
@@ -275,7 +291,7 @@ def api_ig_diff(old_sid: int, new_sid: int):
         "new_count":  len(new_set),
     }
 
-@app.delete("/api/ig-snapshots/{sid}/entries")
+@app.delete("/api/ig-snapshots/{sid}")
 def api_ig_delete_snapshot(sid: int):
     from database.db import delete_ig_snapshot
     delete_ig_snapshot(sid)
