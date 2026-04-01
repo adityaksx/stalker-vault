@@ -10,6 +10,7 @@ const modalClose  = document.getElementById('modal-close');
 const addForm     = document.getElementById('add-form');
 const toast       = document.getElementById('toast');
 
+
 function showToast(msg, type = 'success') {
   toast.textContent = msg;
   toast.className = `toast ${type} show`;
@@ -18,11 +19,15 @@ function showToast(msg, type = 'success') {
 
 async function loadPeople() {
   grid.innerHTML = `<div class="loader"><div class="spinner"></div> Loading...</div>`;
-  const res = await fetch(`${API}/api/people`);
-  const data = await res.json();
-  allPeople = data.people || [];
-  countBadge.textContent = `${allPeople.length} ${allPeople.length === 1 ? 'person' : 'people'}`;
-  renderGrid(allPeople);
+  try {
+    const res  = await fetch(`${API}/api/people`);
+    const data = await res.json();
+    allPeople  = data.people || [];
+    countBadge.textContent = `${allPeople.length} ${allPeople.length === 1 ? 'person' : 'people'}`;
+    renderGrid(allPeople);
+  } catch {
+    grid.innerHTML = `<div class="empty-state"><div class="emoji">⚠️</div><p>Could not load data.</p></div>`;
+  }
 }
 
 function renderGrid(people) {
@@ -37,16 +42,16 @@ function renderGrid(people) {
   }
   grid.innerHTML = people.map(p => {
     const tags = p.tag
-      ? p.tag.split(',').map(t => `<span class="tag">${t.trim()}</span>`).join('')
+      ? p.tag.split(',').map(t => `<span class="tag">${esc(t.trim())}</span>`).join('')
       : '';
     const avatar = p.profile_pic
-      ? `<img class="person-avatar" src="${p.profile_pic}" alt="${p.name}" onerror="this.style.display='none'">`
+      ? `<img class="person-avatar" src="${esc(p.profile_pic)}" alt="${esc(p.name)}" onerror="this.style.display='none'">`
       : `<div class="avatar-placeholder">👤</div>`;
-    const handle = p.insta ? `<div class="person-handle">@${p.insta}</div>` : '';
+    const handle = p.insta ? `<div class="person-handle">@${esc(p.insta)}</div>` : '';
     return `
       <a class="person-card" href="/person/${p.id}">
         ${avatar}
-        <div class="person-name">${p.name}</div>
+        <div class="person-name">${esc(p.name)}</div>
         ${handle}
         <div class="person-tags">${tags}</div>
         <div class="person-date">${fmtDate(p.added_at)}</div>
@@ -63,12 +68,18 @@ searchInput.addEventListener('input', () => {
   ));
 });
 
-function openModal()  { modal.classList.add('open'); addForm.reset(); }
+function openModal()  {
+  modal.classList.add('open');
+  addForm.reset();
+  setTimeout(() => addForm.querySelector('input[name="name"]').focus(), 50);}
+
 function closeModal() { modal.classList.remove('open'); }
 addBtn.addEventListener('click', openModal);
 modalClose.addEventListener('click', closeModal);
 modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.getElementById('add-modal').classList.remove('open');
+});
 
 addForm.addEventListener('submit', async e => {
   e.preventDefault();
@@ -93,6 +104,10 @@ function fmtDate(iso) {
       day: 'numeric', month: 'short', year: 'numeric'
     });
   } catch { return iso; }
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 loadPeople();
