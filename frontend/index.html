@@ -32,12 +32,12 @@
 
 <!-- Modal -->
 <div class="modal-overlay" id="add-modal">
-  <div class="modal">
-    <h2>✨ New Person</h2>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <h2 id="modal-title">✨ New Person</h2>
     <form id="add-form">
       <div class="form-group">
         <label>Name *</label>
-        <input type="text" name="name" placeholder="Full name" required autofocus/>
+        <input type="text" name="name" placeholder="Full name" required/>
       </div>
       <p style="color:var(--muted); font-size:0.82rem; margin-bottom:1.2rem; line-height:1.6;">
         Add socials, phone, photos and more on the person's page after creating.
