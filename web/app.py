@@ -404,9 +404,20 @@ def _fetch_pfp_sync(username: str) -> bytes | None:
     else:
         print(f"[tier1-skip] @{username} — tier1 disabled")
 
-    # ── Tier 2: og:image HTML scrape ──
+    # ── Tier 2: og:image with IG session cookies ──
     try:
         time.sleep(random.uniform(1.0, 2.0))
+
+        # extract cookies from instaloader session
+        ig_cookies = {}
+        try:
+            ig_cookies = {
+                c.name: c.value
+                for c in _il.context._session.cookies
+            }
+        except Exception:
+            pass
+
         headers = {
             **BROWSER_HEADERS,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -419,6 +430,7 @@ def _fetch_pfp_sync(username: str) -> bytes | None:
         r = httpx.get(
             f"https://www.instagram.com/{username}/",
             headers=headers,
+            cookies=ig_cookies,  # ← pass session cookies
             timeout=15,
             follow_redirects=True,
         )
@@ -433,7 +445,13 @@ def _fetch_pfp_sync(username: str) -> bytes | None:
             )
             if match:
                 og_url = match.group(1).replace("&amp;", "&")
-                img = httpx.get(og_url, headers=BROWSER_HEADERS, timeout=15, follow_redirects=True)
+                img = httpx.get(
+                    og_url,
+                    headers=BROWSER_HEADERS,
+                    cookies=ig_cookies,  # ← also pass on image fetch
+                    timeout=15,
+                    follow_redirects=True,
+                )
                 if img.status_code == 200 and check_image_size(img.content, username):
                     return img.content
                 print(f"[tier2-lowres] @{username} — og:image too small")
@@ -441,6 +459,8 @@ def _fetch_pfp_sync(username: str) -> bytes | None:
                 print(f"[tier2-miss] @{username} — og:image not in HTML (login wall?)")
         else:
             print(f"[tier2-http] @{username} — status {r.status_code}")
+    except Exception as ex:
+        print(f"[warn] tier2 @{username}: {ex}")
     except Exception as ex:
         print(f"[warn] tier2 @{username}: {ex}")
 
