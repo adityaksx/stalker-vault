@@ -301,7 +301,7 @@ async def api_ig_import(
                 await asyncio.sleep(10)
 
             local_path = None
-            
+
             # ── Try HD via instaloader first ──
             filename = await fetch_and_save_pfp(uname, pic_dir)
 
@@ -360,19 +360,52 @@ def api_ig_delete_snapshot(sid: int):
 
 def _fetch_pfp_sync(username: str) -> bytes | None:
     try:
-        time.sleep(random.uniform(1.5, 3.5))   # ← random delay every user
+        time.sleep(random.uniform(1.5, 3.5))
 
-        profile = instaloader.Profile.from_username(_il.context, username)
-        url = profile.profile_pic_url
-        r = httpx.get(url, timeout=10, follow_redirects=True)
+        # Fetch profile page like a real browser (no instaloader)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+        }
+
+        # Try instaloader first (works for public + followed accounts)
+        try:
+            profile = instaloader.Profile.from_username(_il.context, username)
+            url = profile.profile_pic_url
+            r = httpx.get(url, headers=headers, timeout=10, follow_redirects=True)
+            if r.status_code == 200:
+                return r.content
+        except instaloader.exceptions.ProfileNotExistsException:
+            pass  # fall through to direct scrape below
+
+        # Fallback — scrape the public profile page directly
+        r = httpx.get(
+            f"https://www.instagram.com/{username}/?__a=1&__d=dis",
+            headers=headers,
+            timeout=10,
+            follow_redirects=True,
+        )
         if r.status_code == 200:
-            return r.content
+            data = r.json()
+            pic_url = (
+                data.get("graphql", {})
+                    .get("user", {})
+                    .get("profile_pic_url_hd") or
+                data.get("graphql", {})
+                    .get("user", {})
+                    .get("profile_pic_url")
+            )
+            if pic_url:
+                img = httpx.get(pic_url, headers=headers, timeout=10, follow_redirects=True)
+                if img.status_code == 200:
+                    return img.content
 
-    except instaloader.exceptions.ProfileNotExistsException:
-        print(f"[skip] {username} — deleted/private/renamed")
     except instaloader.exceptions.ConnectionException as ex:
         print(f"[rate-limit] {username} — sleeping 30s: {ex}")
-        time.sleep(30)   # ← hard back-off on rate limit
+        time.sleep(30)
     except Exception as ex:
         print(f"[warn] HD pfp failed for {username}: {ex}")
     return None
