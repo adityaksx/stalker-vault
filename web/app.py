@@ -9,7 +9,7 @@ import os
 import io as _io
 import logging
 import json
-
+import random
 
 from PIL import Image
 from dotenv import load_dotenv
@@ -24,7 +24,7 @@ BASE_DIR     = Path(__file__).parent
 ROOT_DIR     = BASE_DIR.parent
 FRONTEND_DIR = ROOT_DIR / "frontend"
 STORAGE_DIR  = ROOT_DIR / "storage"
-MIN_PFP_SIZE = 150  # reject anything smaller than 300x300
+MIN_PFP_SIZE = 250  # reject anything smaller than 300x300
 STATE_FILE = Path(__file__).parent / "ig_browser_state.json"
 
 load_dotenv()   # loads .env file automatically
@@ -299,6 +299,9 @@ async def api_ig_import(
     hd_count       = 0
     rejected_count = 0
 
+    # per request delay
+    await asyncio.sleep(random.uniform(1.5, 4))
+
     for i, (uname, fname, pic_url) in enumerate(entries):
         if i > 0 and i % 20 == 0:
             print(f"[pause] {i}/{len(entries)} done — sleeping 10s")
@@ -398,12 +401,15 @@ async def fetch_pfp_api(username: str) -> bytes | None:
                 return None
 
             # Full fallback chain — newest fields first
-            hd_url = (
-                user.get("hd_profile_pic_url_info", {}).get("url")
-                or (user.get("hd_profile_pic_versions") or [{}])[-1].get("url")
-                or user.get("profile_pic_url_hd")
-                or user.get("profile_pic_url")
-            )
+            versions = user.get("hd_profile_pic_versions") or []
+
+            if versions:
+                hd_url = max(versions, key=lambda x: x.get("width", 0)).get("url")
+            else:
+                hd_url = (
+                        user.get("hd_profile_pic_url_info", {}).get("url")
+                        or user.get("profile_pic_url")
+                )
 
             if not hd_url:
                 print(f"[api-nourl] @{username} — no pic URL found in response")
@@ -419,6 +425,14 @@ async def fetch_pfp_api(username: str) -> bytes | None:
         except Exception as e:
             print(f"[api-error] @{username} — {str(e)}")
 
+    return None
+
+async def fetch_pfp_api_with_retry(username: str) -> bytes | None:
+    for _ in range(2):
+        data = await fetch_pfp_api(username)   # ✅ correct function
+        if data:
+            return data
+        await asyncio.sleep(random.uniform(2,5))
     return None
 
 # Runs in a ThreadPoolExecutor — completely isolated from asyncio loop
@@ -499,7 +513,7 @@ def _playwright_fetch_sync(username: str) -> bytes | None:
 # The new fetch and save orchestrator
 async def fetch_and_save_pfp(username: str, csv_pic_url: str, dest_dir: Path, safe_name: str) -> str | None:
     # Tier 1: Fast Hidden Web API
-    data = await fetch_pfp_api(username)
+    data = await fetch_pfp_api_with_retry(username)
 
     if data:
         print(f"[✅ SUCCESS] @{username} — Fetched via API")
@@ -507,9 +521,9 @@ async def fetch_and_save_pfp(username: str, csv_pic_url: str, dest_dir: Path, sa
         # Tier 2: Playwright in a thread (avoids Windows asyncio conflict)
         print(f"[fallback] @{username} — API failed, trying Playwright thread...")
         loop = asyncio.get_event_loop()
-        data = await loop.run_in_executor(_executor, _playwright_fetch_sync, username)
-        if data:
-            print(f"[✅ SUCCESS] @{username} — Fetched via Playwright")
+        if not data:
+            print(f"[❌ API FAIL] @{username}")
+            return None
 
     if data:
         filename = f"{username}_{uuid.uuid4().hex[:8]}.jpg"
