@@ -1,11 +1,11 @@
-import os, sys, json, shutil, uuid
+import sys, shutil, uuid
 from pathlib import Path
 from typing import Optional
 import re
 import httpx
 
 from fastapi import FastAPI, Form, File, UploadFile, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 BASE_DIR     = Path(__file__).parent
@@ -23,10 +23,15 @@ STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static",   StaticFiles(directory=str(FRONTEND_DIR / "static")), name="static")
 app.mount("/storage",  StaticFiles(directory=str(STORAGE_DIR)),              name="storage")
 
-@app.on_event("startup")
-async def startup():
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     from database.db import init_db
     init_db()
+    yield
+
+app = FastAPI(title="Vault", lifespan=lifespan)
 
 # ── Helpers ──
 TYPE_FOLDER = {
@@ -169,7 +174,7 @@ async def api_add_media(
     local_path = str(dest.resolve()).replace("\\", "/")
 
     with dest.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
+        shutil.copyfileobj(file.file, f) # noqa
 
     mid = add_media(pid, media_type, url,
                     filename=original_name, caption=caption, local_path=local_path)
