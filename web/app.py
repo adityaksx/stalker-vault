@@ -8,7 +8,9 @@ import asyncio
 import os
 import time
 import random
+import io as _io
 
+from PIL import Image
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, Form, File, UploadFile, HTTPException
@@ -21,6 +23,13 @@ BASE_DIR     = Path(__file__).parent
 ROOT_DIR     = BASE_DIR.parent
 FRONTEND_DIR = ROOT_DIR / "frontend"
 STORAGE_DIR  = ROOT_DIR / "storage"
+MIN_PFP_SIZE = 300  # reject anything smaller than 300x300
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+    "Connection": "keep-alive",
+}
 
 load_dotenv()   # loads .env file automatically
 
@@ -303,7 +312,7 @@ async def api_ig_import(
             local_path = None
 
             # ── Try HD via instaloader first ──
-            filename = await fetch_and_save_pfp(uname, pic_dir)
+            local_path = await fetch_and_save_pfp(uname, pic_url, pic_dir, safe_name)
 
             if filename:
                 local_path = f"/storage/{safe_name}/ig_pics/{filename}"
@@ -357,66 +366,63 @@ def api_ig_delete_snapshot(sid: int):
     delete_ig_snapshot(sid)
     return {"ok": True}
 
+def check_image_size(data: bytes, username: str) -> bool:
+    try:
+        img = Image.open(_io.BytesIO(data))
+        w, h = img.size
+        if w < MIN_PFP_SIZE or h < MIN_PFP_SIZE:
+            print(f"[❌ LOW-RES] @{username} — {w}x{h} (rejected, min {MIN_PFP_SIZE}px)")
+            return False
+        print(f"[✅ HD] @{username} — {w}x{h}")
+        return True
+    except Exception:
+        return False
 
 def _fetch_pfp_sync(username: str) -> bytes | None:
+    time.sleep(random.uniform(1.0, 2.5))
+
+    # ── Tier 1: Instaloader HD ──
     try:
-        time.sleep(random.uniform(1.5, 3.5))
-
-        # Fetch profile page like a real browser (no instaloader)
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Connection": "keep-alive",
-        }
-
-        # Try instaloader first (works for public + followed accounts)
-        try:
-            profile = instaloader.Profile.from_username(_il.context, username)
-            url = profile.profile_pic_url
-            r = httpx.get(url, headers=headers, timeout=10, follow_redirects=True)
-            if r.status_code == 200:
-                return r.content
-        except instaloader.exceptions.ProfileNotExistsException:
-            pass  # fall through to direct scrape below
-
-        # Fallback — scrape the public profile page directly
-        r = httpx.get(
-            f"https://www.instagram.com/{username}/?__a=1&__d=dis",
-            headers=headers,
-            timeout=10,
-            follow_redirects=True,
-        )
-        if r.status_code == 200:
-            data = r.json()
-            pic_url = (
-                data.get("graphql", {})
-                    .get("user", {})
-                    .get("profile_pic_url_hd") or
-                data.get("graphql", {})
-                    .get("user", {})
-                    .get("profile_pic_url")
-            )
-            if pic_url:
-                img = httpx.get(pic_url, headers=headers, timeout=10, follow_redirects=True)
-                if img.status_code == 200:
-                    return img.content
-
+        profile = instaloader.Profile.from_username(_il.context, username)
+        hd_url  = getattr(profile, 'profile_pic_url_hd', None) or profile.profile_pic_url
+        r = httpx.get(hd_url, headers=BROWSER_HEADERS, timeout=10, follow_redirects=True)
+        if r.status_code == 200 and check_image_size(r.content, username):
+            return r.content
+        # size rejected — fall through to tier 2
+    except instaloader.exceptions.ProfileNotExistsException:
+        pass
     except instaloader.exceptions.ConnectionException as ex:
-        print(f"[rate-limit] {username} — sleeping 30s: {ex}")
+        print(f"[rate-limit] @{username} — sleeping 30s: {ex}")
         time.sleep(30)
     except Exception as ex:
-        print(f"[warn] HD pfp failed for {username}: {ex}")
+        print(f"[warn] tier1 @{username}: {ex}")
+
+    # ── Tier 2: ?__a=1 JSON scrape ──
+    try:
+        time.sleep(random.uniform(0.5, 1.5))
+        r = httpx.get(
+            f"https://www.instagram.com/{username}/?__a=1&__d=dis",
+            headers=BROWSER_HEADERS, timeout=10, follow_redirects=True,
+        )
+        if r.status_code == 200:
+            user   = r.json().get("graphql", {}).get("user", {})
+            hd_url = user.get("profile_pic_url_hd") or user.get("profile_pic_url")
+            if hd_url:
+                img = httpx.get(hd_url, headers=BROWSER_HEADERS, timeout=10, follow_redirects=True)
+                if img.status_code == 200 and check_image_size(img.content, username):
+                    return img.content
+    except Exception as ex:
+        print(f"[warn] tier2 @{username}: {ex}")
+
+    # ── Tier 3: Reject ──
+    print(f"[❌ NO HD] @{username} — no HD pic available, skipping")
     return None
 
-async def fetch_and_save_pfp(username: str, dest_dir: Path) -> str | None:
-    """Fetch HD pfp and save as username_randomid.jpg — returns local url path or None."""
+async def fetch_and_save_pfp(username: str, csv_pic_url: str, dest_dir: Path, safe_name: str) -> str | None:
     loop = asyncio.get_event_loop()
     data = await loop.run_in_executor(_executor, _fetch_pfp_sync, username)
     if data:
         filename = f"{username}_{uuid.uuid4().hex[:8]}.jpg"
-        dest     = dest_dir / filename
-        dest.write_bytes(data)
-        return filename   # caller builds the full path
+        (dest_dir / filename).write_bytes(data)
+        return f"/storage/{safe_name}/ig_pics/{filename}"
     return None
