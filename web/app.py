@@ -3,35 +3,67 @@ from pathlib import Path
 from typing import Optional
 import re
 import httpx
+import instaloader
+import asyncio
 
+from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, Form, File, UploadFile, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+
+from contextlib import asynccontextmanager
 
 BASE_DIR     = Path(__file__).parent
 ROOT_DIR     = BASE_DIR.parent
 FRONTEND_DIR = ROOT_DIR / "frontend"
 STORAGE_DIR  = ROOT_DIR / "storage"
 
+load_dotenv()   # loads .env file automatically
+
+IG_USER = os.getenv("IG_USERNAME", "")
+IG_PASS = os.getenv("IG_PASSWORD", "")
+
+_il = instaloader.Instaloader(
+    download_pictures=False,   # we handle saving ourselves
+    quiet=True,
+    request_timeout=10,
+)
+_executor = ThreadPoolExecutor(max_workers=4)
+
+
 sys.path.insert(0, str(ROOT_DIR))
 
-app = FastAPI(title="Vault")
+SESSION_FILE = Path(__file__).parent / ".ig_session"
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from database.db import init_db
+    init_db()
+
+    if IG_USER and IG_PASS:
+        try:
+            if SESSION_FILE.exists():
+                # Load saved session — no password needed
+                _il.load_session_from_file(IG_USER, str(SESSION_FILE))
+                print(f"[✓] Instagram session loaded for @{IG_USER}")
+            else:
+                # First run — login and save session
+                _il.login(IG_USER, IG_PASS)
+                _il.save_session_to_file(str(SESSION_FILE))
+                print(f"[✓] Instagram logged in + session saved for @{IG_USER}")
+        except Exception as ex:
+            print(f"[!] Instagram login failed: {ex}")
+
+    yield
+
+app = FastAPI(title="Vault", lifespan=lifespan)
+
 
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 (FRONTEND_DIR / "static").mkdir(parents=True, exist_ok=True)
 
 app.mount("/static",   StaticFiles(directory=str(FRONTEND_DIR / "static")), name="static")
 app.mount("/storage",  StaticFiles(directory=str(STORAGE_DIR)),              name="storage")
-
-from contextlib import asynccontextmanager
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    from database.db import init_db
-    init_db()
-    yield
-
-app = FastAPI(title="Vault", lifespan=lifespan)
 
 # ── Helpers ──
 TYPE_FOLDER = {
@@ -258,16 +290,25 @@ async def api_ig_import(
     async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
         for (uname, fname, pic_url) in entries:
             local_path = None
-            if pic_url:
+
+            # ── Try HD via instaloader first ──
+            filename = await fetch_and_save_pfp(uname, pic_dir)
+
+            if filename:
+                local_path = f"/storage/{safe_name}/ig_pics/{filename}"
+
+            elif pic_url:
+                # ── Fallback: use extension's low-res URL ──
                 try:
-                    filename   = f"{uname}_{uuid.uuid4().hex[:8]}.jpg"
-                    dest       = pic_dir / filename
-                    r          = await client.get(pic_url)
+                    filename = f"{uname}_{uuid.uuid4().hex[:8]}.jpg"
+                    dest = pic_dir / filename
+                    r = await client.get(pic_url, follow_redirects=True)
                     if r.status_code == 200:
                         dest.write_bytes(r.content)
                         local_path = f"/storage/{safe_name}/ig_pics/{filename}"
-                except Exception:
-                    pass
+                except Exception as ex:
+                    print(f"[warn] fallback pic failed for {uname}: {ex}")
+
             add_ig_entry(sid, uname, fname, pic_url, local_path)
 
     return {"ok": True, "snapshot_id": sid, "count": len(entries)}
@@ -304,3 +345,27 @@ def api_ig_delete_snapshot(sid: int):
     from database.db import delete_ig_snapshot
     delete_ig_snapshot(sid)
     return {"ok": True}
+
+def _fetch_pfp_sync(username: str) -> bytes | None:
+    """Runs in thread — instaloader is sync."""
+    try:
+        profile = instaloader.Profile.from_username(_il.context, username)
+        url = profile.profile_pic_url
+        import httpx
+        r = httpx.get(url, timeout=10, follow_redirects=True)
+        if r.status_code == 200:
+            return r.content
+    except Exception as ex:
+        print(f"[warn] HD pfp failed for {username}: {ex}")
+    return None
+
+async def fetch_and_save_pfp(username: str, dest_dir: Path) -> str | None:
+    """Fetch HD pfp and save as username_randomid.jpg — returns local url path or None."""
+    loop = asyncio.get_event_loop()
+    data = await loop.run_in_executor(_executor, _fetch_pfp_sync, username)
+    if data:
+        filename = f"{username}_{uuid.uuid4().hex[:8]}.jpg"
+        dest     = dest_dir / filename
+        dest.write_bytes(data)
+        return filename   # caller builds the full path
+    return None
