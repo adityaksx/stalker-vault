@@ -23,6 +23,7 @@ ROOT_DIR     = BASE_DIR.parent
 FRONTEND_DIR = ROOT_DIR / "frontend"
 STORAGE_DIR  = ROOT_DIR / "storage"
 MIN_PFP_SIZE = 150  # reject anything smaller than 300x300
+STATE_FILE = Path(__file__).parent / "ig_browser_state.json"
 
 load_dotenv()   # loads .env file automatically
 
@@ -362,14 +363,6 @@ def check_image_size(data: bytes, username: str) -> bool:
 
 # New Tier 1: Fast Hidden Web API (No login required)
 async def fetch_pfp_api(username: str) -> bytes | None:
-    url = f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}"
-    headers = {
-        "accept": "*/*",
-        "accept-language": "en-US,en;q=0.9",
-        "x-ig-app-id": "936619743392459",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-    }
-
     # Extract cookies from Instaloader session
     ig_cookies = {}
     try:
@@ -377,29 +370,60 @@ async def fetch_pfp_api(username: str) -> bytes | None:
     except Exception:
         pass
 
+    web_headers = {
+        "accept": "*/*",
+        "accept-language": "en-US,en;q=0.9",
+        "x-ig-app-id": "936619743392459",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    }
+    # Step 2 uses mobile app headers — required for the 1080x1080 endpoint
+    mobile_headers = {
+        "User-Agent": "Instagram 219.0.0.12.117 Android (28/9; 380dpi; 1080x2061; OnePlus; GM1910; OnePlus7Pro; qcom; en_US; 302733750)",
+        "x-ig-app-id": "567067343352427",
+        "Accept-Language": "en-US",
+    }
+
     async with httpx.AsyncClient(cookies=ig_cookies) as client:
         try:
-            response = await client.get(url, headers=headers, timeout=10.0)
-            print(f"[api-status] @{username} — HTTP {response.status_code}")
-            if response.status_code == 200:
-                data = response.json()
-                user = data.get("data", {}).get("user", {})
-                if not user:
-                    print(f"[api-empty] @{username} — no user in response")
-                    return None
-                hd_url = (
-                    user.get("hd_profile_pic_url_info", {}).get("url")
-                    or user.get("profile_pic_url_hd")
-                    or user.get("profile_pic_url")
-                )
-                if hd_url:
-                    img_response = await client.get(hd_url, timeout=15.0, follow_redirects=True)
-                    if img_response.status_code == 200 and check_image_size(img_response.content, username):
-                        return img_response.content
-            else:
-                print(f"[api-fail] @{username} — Status: {response.status_code}")
+            # Step 1: Get the user's numeric ID
+            r1 = await client.get(
+                f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}",
+                headers=web_headers,
+                timeout=10.0
+            )
+            print(f"[api-status] @{username} — HTTP {r1.status_code}")
+            if r1.status_code != 200:
+                print(f"[api-fail] @{username} — Status: {r1.status_code}")
+                return None
+
+            user_id = r1.json().get("data", {}).get("user", {}).get("id")
+            if not user_id:
+                print(f"[api-nouid] @{username} — could not get user ID")
+                return None
+
+            # Step 2: Fetch real HD (1080x1080) via mobile endpoint
+            r2 = await client.get(
+                f"https://i.instagram.com/api/v1/users/{user_id}/info/",
+                headers=mobile_headers,
+                timeout=10.0
+            )
+            print(f"[mobile-api] @{username} — HTTP {r2.status_code}")
+            if r2.status_code != 200:
+                print(f"[mobile-fail] @{username} — Status: {r2.status_code}")
+                return None
+
+            hd_url = r2.json().get("user", {}).get("hd_profile_pic_url_info", {}).get("url")
+            if not hd_url:
+                print(f"[api-nourl] @{username} — no hd_profile_pic_url_info in response")
+                return None
+
+            img = await client.get(hd_url, timeout=15.0, follow_redirects=True)
+            if img.status_code == 200 and check_image_size(img.content, username):
+                return img.content
+
         except Exception as e:
             print(f"[api-error] @{username} — {str(e)}")
+
     return None
 
 # Runs in a ThreadPoolExecutor — completely isolated from asyncio loop
@@ -410,26 +434,40 @@ def _playwright_fetch_sync(username: str) -> bytes | None:
                 headless=True,
                 args=["--disable-blink-features=AutomationControlled"]
             )
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-            )
-            try:
-                ig_cookies = [
-                    {"name": c.name, "value": c.value, "domain": ".instagram.com", "path": "/"}
-                    for c in _il.context._session.cookies if c.value
-                ]
-                context.add_cookies(ig_cookies)
-                print(f"[playwright] Injected {len(ig_cookies)} session cookies")
-            except Exception as e:
-                print(f"[playwright-cookie-warn] Could not inject cookies: {e}")
+
+            # Load saved manual login session if available
+            if STATE_FILE.exists():
+                context = browser.new_context(
+                    storage_state=str(STATE_FILE),
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                )
+                print(f"[playwright] Loaded saved browser session from {STATE_FILE.name}")
+            else:
+                # Fallback to Instaloader cookie injection
+                context = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                )
+                try:
+                    ig_cookies = [
+                        {"name": c.name, "value": c.value, "domain": ".instagram.com", "path": "/"}
+                        for c in _il.context._session.cookies if c.value
+                    ]
+                    context.add_cookies(ig_cookies)
+                    print(f"[playwright] No state file — injected {len(ig_cookies)} Instaloader cookies")
+                except Exception as e:
+                    print(f"[playwright-cookie-warn] {e}")
 
             page = context.new_page()
             try:
                 page.goto(f"https://www.instagram.com/{username}/", wait_until="networkidle", timeout=20000)
 
+                page_text = page.content()
+                if "This Account is Private" in page_text or "Sorry, this page" in page_text:
+                    print(f"[playwright-private] @{username} — private/unavailable, skipping")
+                    return None
+
                 img_element = None
-                for sel in ['header img', 'header section img', 'img[alt$="profile picture"]',
-                            'img[data-testid="user-avatar"]']:
+                for sel in ['header img', 'header section img', 'img[alt$="profile picture"]', 'img[data-testid="user-avatar"]']:
                     try:
                         img_element = page.wait_for_selector(sel, timeout=3000)
                         if img_element:
@@ -440,8 +478,8 @@ def _playwright_fetch_sync(username: str) -> bytes | None:
 
                 if not img_element:
                     page.screenshot(path=f"debug_{username}.png")
-                    print(f"[playwright-debug] @{username} — screenshot saved as debug_{username}.png — check it!")
-                    raise Exception("No profile picture selector matched")
+                    print(f"[playwright-debug] @{username} — no selector matched, screenshot saved")
+                    return None
 
                 hd_url = img_element.get_attribute('src')
                 print(f"[playwright-url] @{username} — {hd_url[:80] if hd_url else 'None'}")
@@ -451,18 +489,16 @@ def _playwright_fetch_sync(username: str) -> bytes | None:
                         data = img_response.body()
                         if check_image_size(data, username):
                             return data
-                    else:
-                        print(f"[playwright-img-fail] @{username} — status {img_response.status}")
 
-            except Exception as e:
-                print(f"[playwright-fail] @{username} — {str(e)}")
             except Exception as e:
                 print(f"[playwright-fail] @{username} — {str(e)}")
             finally:
                 context.close()
                 browser.close()
+
     except Exception as e:
         print(f"[playwright-outer-fail] @{username} — {str(e)}")
+
     return None
 
 # The new fetch and save orchestrator
