@@ -85,7 +85,13 @@ async def api_update_name(pid: int, name: str = Form(...)):
 
 @app.delete("/api/people/{pid}")
 def api_delete(pid: int):
-    from database.db import delete_person
+    from database.db import delete_person, get_person
+    row = get_person(pid)
+    if row:
+        safe_name = safe_folder_name(row[1])
+        folder = STORAGE_DIR / safe_name
+        if folder.exists():
+            shutil.rmtree(folder, ignore_errors=True)
     delete_person(pid)
     return {"ok": True}
 
@@ -165,7 +171,14 @@ async def api_add_media(
 
 @app.delete("/api/media/{mid}")
 def api_delete_media(mid: int):
-    from database.db import delete_media
+    from database.db import get_media_by_id, delete_media
+    # fetch path before deleting
+    row = get_media_by_id(mid)
+    if row and row["local_path"]:
+        try:
+            Path(row["local_path"]).unlink(missing_ok=True)
+        except Exception:
+            pass
     delete_media(mid)
     return {"ok": True}
 
@@ -244,11 +257,6 @@ async def api_ig_import(
 
     return {"ok": True, "snapshot_id": sid, "count": len(entries)}
 
-@app.delete("/api/ig-snapshots/{sid}")
-def api_ig_delete_snapshot(sid: int):
-    from database.db import delete_ig_snapshot
-    delete_ig_snapshot(sid)
-    return {"ok": True}
 
 @app.get("/api/ig-snapshots/diff")
 def api_ig_diff(old_sid: int, new_sid: int):
@@ -266,3 +274,9 @@ def api_ig_diff(old_sid: int, new_sid: int):
         "old_count":  len(old_set),
         "new_count":  len(new_set),
     }
+
+@app.delete("/api/ig-snapshots/{sid}/entries")
+def api_ig_delete_snapshot(sid: int):
+    from database.db import delete_ig_snapshot
+    delete_ig_snapshot(sid)
+    return {"ok": True}
