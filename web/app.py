@@ -19,6 +19,8 @@ from fastapi.staticfiles import StaticFiles
 
 from contextlib import asynccontextmanager
 
+_t1_failures = 0        # consecutive tier1 failures
+_T1_GIVE_UP  = 10       # after this many, skip tier1 for rest of import
 BASE_DIR     = Path(__file__).parent
 ROOT_DIR     = BASE_DIR.parent
 FRONTEND_DIR = ROOT_DIR / "frontend"
@@ -273,6 +275,12 @@ async def api_ig_import(
     label: Optional[str] = Form(default=None),
     csv_data: str = Form(...),
 ):
+
+    global _t1_failures
+    _t1_failures = 0
+
+    hd_count       = 0
+    rejected_count = 0
     from database.db import create_ig_snapshot, add_ig_entry, get_person
     import csv, io
 
@@ -364,26 +372,38 @@ def check_image_size(data: bytes, username: str) -> bool:
         return False
 
 def _fetch_pfp_sync(username: str) -> bytes | None:
+    global _t1_failures
     time.sleep(random.uniform(1.5, 3.0))
 
-    # ── Tier 1: Instaloader HD (best quality, needs session) ──
-    try:
-        profile = instaloader.Profile.from_username(_il.context, username)
-        hd_url  = getattr(profile, 'profile_pic_url_hd', None) or profile.profile_pic_url
-        r = httpx.get(hd_url, headers=BROWSER_HEADERS, timeout=15, follow_redirects=True)
-        if r.status_code == 200 and check_image_size(r.content, username):
-            return r.content
-        print(f"[tier1-lowres] @{username} — instaloader returned low-res, trying scrape")
-    except instaloader.exceptions.ProfileNotExistsException:
-        print(f"[skip] @{username} — profile not found")
-        return None
-    except instaloader.exceptions.ConnectionException as ex:
-        print(f"[rate-limit] @{username} — sleeping 60s: {ex}")
-        time.sleep(60)
-    except Exception as ex:
-        print(f"[warn] tier1 @{username}: {ex}")
+    # ── Tier 1: Instaloader HD ──
+    if _t1_failures < _T1_GIVE_UP:
+        try:
+            profile = instaloader.Profile.from_username(_il.context, username)
+            hd_url  = getattr(profile, 'profile_pic_url_hd', None) or profile.profile_pic_url
+            r = httpx.get(hd_url, headers=BROWSER_HEADERS, timeout=15, follow_redirects=True)
+            if r.status_code == 200 and check_image_size(r.content, username):
+                _t1_failures = 0          # reset on success
+                return r.content
+            else:
+                _t1_failures += 1
+                print(f"[tier1-fail {_t1_failures}/{_T1_GIVE_UP}] @{username} — low-res or bad response")
+        except instaloader.exceptions.ProfileNotExistsException:
+            print(f"[skip] @{username} — profile not found")
+            return None
+        except instaloader.exceptions.ConnectionException as ex:
+            _t1_failures += 1
+            print(f"[tier1-ratelimit {_t1_failures}/{_T1_GIVE_UP}] @{username} — {ex}")
+            time.sleep(60)
+        except Exception as ex:
+            _t1_failures += 1
+            print(f"[tier1-fail {_t1_failures}/{_T1_GIVE_UP}] @{username}: {ex}")
 
-    # ── Tier 2: Scrape og:image from profile page HTML ──
+        if _t1_failures >= _T1_GIVE_UP:
+            print(f"[⚠️  TIER 1 DISABLED] — {_T1_GIVE_UP} consecutive failures, switching to tier 2 only")
+    else:
+        print(f"[tier1-skip] @{username} — tier1 disabled")
+
+    # ── Tier 2: og:image HTML scrape ──
     try:
         time.sleep(random.uniform(1.0, 2.0))
         headers = {
@@ -402,7 +422,6 @@ def _fetch_pfp_sync(username: str) -> bytes | None:
             follow_redirects=True,
         )
         if r.status_code == 200:
-            # og:image contains the full CDN URL with real dimensions
             import re as _re
             match = _re.search(
                 r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\'](https://[^"\']+)["\']',
@@ -416,15 +435,14 @@ def _fetch_pfp_sync(username: str) -> bytes | None:
                 img = httpx.get(og_url, headers=BROWSER_HEADERS, timeout=15, follow_redirects=True)
                 if img.status_code == 200 and check_image_size(img.content, username):
                     return img.content
-                print(f"[tier2-lowres] @{username} — og:image also low-res")
+                print(f"[tier2-lowres] @{username} — og:image too small")
             else:
-                print(f"[tier2-miss] @{username} — og:image not found in HTML (likely login wall)")
+                print(f"[tier2-miss] @{username} — og:image not in HTML (login wall?)")
         else:
             print(f"[tier2-http] @{username} — status {r.status_code}")
     except Exception as ex:
         print(f"[warn] tier2 @{username}: {ex}")
 
-    # ── Tier 3: No HD available ──
     print(f"[❌ NO HD] @{username} — all tiers failed, skipping")
     return None
 
