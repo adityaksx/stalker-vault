@@ -7,8 +7,8 @@ import instaloader
 import asyncio
 import os
 import time
-import random
 import io as _io
+import logging
 
 from PIL import Image
 from dotenv import load_dotenv
@@ -16,22 +16,17 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, Form, File, UploadFile, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-
 from contextlib import asynccontextmanager
+from playwright.async_api import async_playwright
 
-_t1_failures = 0        # consecutive tier1 failures
-_T1_GIVE_UP  = 10       # after this many, skip tier1 for rest of import
 BASE_DIR     = Path(__file__).parent
 ROOT_DIR     = BASE_DIR.parent
 FRONTEND_DIR = ROOT_DIR / "frontend"
 STORAGE_DIR  = ROOT_DIR / "storage"
 MIN_PFP_SIZE = 150  # reject anything smaller than 300x300
-BROWSER_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-    "Connection": "keep-alive",
-}
+# NEW: Global Playwright and Browser variables
+playwright_manager = None
+playwright_browser = None
 
 load_dotenv()   # loads .env file automatically
 
@@ -55,21 +50,36 @@ async def lifespan(app: FastAPI):
     from database.db import init_db
     init_db()
 
+    # 1. Start Instaloader session
     if IG_USER and IG_PASS:
         try:
             if SESSION_FILE.exists():
-                # Load saved session — no password needed
                 _il.load_session_from_file(IG_USER, str(SESSION_FILE))
                 print(f"[✓] Instagram session loaded for @{IG_USER}")
             else:
-                # First run — login and save session
                 _il.login(IG_USER, IG_PASS)
                 _il.save_session_to_file(str(SESSION_FILE))
                 print(f"[✓] Instagram logged in + session saved for @{IG_USER}")
         except Exception as ex:
             print(f"[!] Instagram login failed: {ex}")
 
-    yield
+    # 2. Start Global Playwright Browser (Headless)
+    global playwright_manager, playwright_browser
+    try:
+        playwright_manager = await async_playwright().start()
+        playwright_browser = await playwright_manager.chromium.launch(headless=True)
+        print("[✓] Playwright Headless Browser initialized successfully")
+    except Exception as e:
+        print(f"[!] Playwright failed to start: {e}")
+
+    yield  # ─── APP IS RUNNING ───
+
+    # 3. Shutdown routine
+    if playwright_browser:
+        await playwright_browser.close()
+    if playwright_manager:
+        await playwright_manager.stop()
+    print("[✓] Playwright Browser shut down cleanly")
 
 app = FastAPI(title="Vault", lifespan=lifespan)
 
@@ -276,9 +286,6 @@ async def api_ig_import(
     csv_data: str = Form(...),
 ):
 
-    global _t1_failures
-    _t1_failures = 0
-
     hd_count       = 0
     rejected_count = 0
     from database.db import create_ig_snapshot, add_ig_entry, get_person
@@ -359,6 +366,7 @@ def api_ig_delete_snapshot(sid: int):
     delete_ig_snapshot(sid)
     return {"ok": True}
 
+
 def check_image_size(data: bytes, username: str) -> bool:
     try:
         img = Image.open(_io.BytesIO(data))
@@ -371,107 +379,89 @@ def check_image_size(data: bytes, username: str) -> bool:
     except Exception:
         return False
 
-def _fetch_pfp_sync(username: str) -> bytes | None:
-    global _t1_failures
-    time.sleep(random.uniform(1.5, 3.0))
 
-    # ── Tier 1: Instaloader HD ──
-    if _t1_failures < _T1_GIVE_UP:
+# New Tier 1: Fast Hidden Web API (No login required)
+async def fetch_pfp_api(username: str) -> bytes | None:
+    url = f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}"
+    headers = {
+        "accept": "*/*",
+        "accept-language": "en-US,en;q=0.9",
+        "x-ig-app-id": "936619743392459",  # Instagram's internal Web App ID
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    }
+
+    async with httpx.AsyncClient() as client:
         try:
-            profile = instaloader.Profile.from_username(_il.context, username)
-            hd_url  = getattr(profile, 'profile_pic_url_hd', None) or profile.profile_pic_url
-            r = httpx.get(hd_url, headers=BROWSER_HEADERS, timeout=15, follow_redirects=True)
-            if r.status_code == 200 and check_image_size(r.content, username):
-                _t1_failures = 0          # reset on success
-                return r.content
+            response = await client.get(url, headers=headers, timeout=10.0)
+            if response.status_code == 200:
+                data = response.json()
+                hd_url = data.get("data", {}).get("user", {}).get("hd_profile_pic_url_info", {}).get("url")
+
+                if hd_url:
+                    img_response = await client.get(hd_url, timeout=15.0)
+                    if img_response.status_code == 200 and check_image_size(img_response.content, username):
+                        return img_response.content
             else:
-                _t1_failures += 1
-                print(f"[tier1-fail {_t1_failures}/{_T1_GIVE_UP}] @{username} — low-res or bad response")
-        except instaloader.exceptions.ProfileNotExistsException:
-            _t1_failures += 1
-            print(f"[tier1-fail {_t1_failures}/{_T1_GIVE_UP}] @{username} — ProfileNotFound (likely rate-limited)")
-            return None
-        except instaloader.exceptions.ConnectionException as ex:
-            _t1_failures += 1
-            print(f"[tier1-ratelimit {_t1_failures}/{_T1_GIVE_UP}] @{username} — {ex}")
-            time.sleep(60)
-        except Exception as ex:
-            _t1_failures += 1
-            print(f"[tier1-fail {_t1_failures}/{_T1_GIVE_UP}] @{username}: {ex}")
+                logging.warning(f"[api-fail] @{username} — Status: {response.status_code}")
+        except Exception as e:
+            logging.error(f"[api-error] @{username} — {str(e)}")
 
-        if _t1_failures >= _T1_GIVE_UP:
-            print(f"[⚠️  TIER 1 DISABLED] — {_T1_GIVE_UP} consecutive failures, switching to tier 2 only")
-    else:
-        print(f"[tier1-skip] @{username} — tier1 disabled")
-
-    # ── Tier 2: og:image with IG session cookies ──
-    try:
-        time.sleep(random.uniform(1.0, 2.0))
-
-        # extract cookies from instaloader session
-        ig_cookies = {}
-        try:
-            ig_cookies = {
-                c.name: c.value
-                for c in _il.context._session.cookies
-            }
-        except Exception:
-            pass
-
-        headers = {
-            **BROWSER_HEADERS,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Sec-Fetch-Site": "none",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-User": "?1",
-            "Sec-Fetch-Dest": "document",
-            "Upgrade-Insecure-Requests": "1",
-        }
-        r = httpx.get(
-            f"https://www.instagram.com/{username}/",
-            headers=headers,
-            cookies=ig_cookies,  # ← pass session cookies
-            timeout=15,
-            follow_redirects=True,
-        )
-        if r.status_code == 200:
-            import re as _re
-            match = _re.search(
-                r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\'](https://[^"\']+)["\']',
-                r.text,
-            ) or _re.search(
-                r'<meta[^>]+content=["\'](https://[^"\']+)["\'][^>]+property=["\']og:image["\']',
-                r.text,
-            )
-            if match:
-                og_url = match.group(1).replace("&amp;", "&")
-                img = httpx.get(
-                    og_url,
-                    headers=BROWSER_HEADERS,
-                    cookies=ig_cookies,  # ← also pass on image fetch
-                    timeout=15,
-                    follow_redirects=True,
-                )
-                if img.status_code == 200 and check_image_size(img.content, username):
-                    return img.content
-                print(f"[tier2-lowres] @{username} — og:image too small")
-            else:
-                print(f"[tier2-miss] @{username} — og:image not in HTML (login wall?)")
-        else:
-            print(f"[tier2-http] @{username} — status {r.status_code}")
-    except Exception as ex:
-        print(f"[warn] tier2 @{username}: {ex}")
-    except Exception as ex:
-        print(f"[warn] tier2 @{username}: {ex}")
-
-    print(f"[❌ NO HD] @{username} — all tiers failed, skipping")
     return None
 
+
+# New Tier 2: Headless Incognito Browser Fallback
+# New Tier 2: Headless Incognito Browser Fallback (Reuses Global Browser)
+async def fetch_pfp_playwright(username: str) -> bytes | None:
+    global playwright_browser
+
+    if not playwright_browser:
+        logging.error("[playwright-fail] Browser is not running.")
+        return None
+
+    # Open a new fast, isolated incognito tab
+    context = await playwright_browser.new_context()
+    page = await context.new_page()
+
+    try:
+        await page.goto(f"https://www.instagram.com/{username}/", wait_until="domcontentloaded")
+
+        # Instagram loads the HD pfp inside the header tag
+        img_element = await page.wait_for_selector('header img', timeout=8000)
+
+        if img_element:
+            hd_url = await img_element.get_attribute('src')
+            if hd_url and "150x150" not in hd_url:
+                async with httpx.AsyncClient() as client:
+                    img_response = await client.get(hd_url, timeout=15.0)
+                    if img_response.status_code == 200 and check_image_size(img_response.content, username):
+                        return img_response.content
+    except Exception as e:
+        logging.error(f"[playwright-fail] @{username} — {str(e)}")
+    finally:
+        # Close the tab immediately to free memory
+        await context.close()
+
+    return None
+
+
+# The new fetch and save orchestrator
 async def fetch_and_save_pfp(username: str, csv_pic_url: str, dest_dir: Path, safe_name: str) -> str | None:
-    loop = asyncio.get_event_loop()
-    data = await loop.run_in_executor(_executor, _fetch_pfp_sync, username)
+    # Try the fast API first
+    data = await fetch_pfp_api(username)
+
+    if data:
+        print(f"[✅ SUCCESS] @{username} — Fetched via API")
+    else:
+        # Fallback to Playwright if API fails
+        print(f"[fallback] @{username} — API failed, launching Playwright...")
+        data = await fetch_pfp_playwright(username)
+        if data:
+            print(f"[✅ SUCCESS] @{username} — Fetched via Playwright")
+
     if data:
         filename = f"{username}_{uuid.uuid4().hex[:8]}.jpg"
         (dest_dir / filename).write_bytes(data)
         return f"/storage/{safe_name}/ig_pics/{filename}"
+
+    print(f"[❌ NO HD] @{username} — All modern tiers failed")
     return None
