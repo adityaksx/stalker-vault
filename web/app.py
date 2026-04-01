@@ -17,7 +17,7 @@ from fastapi import FastAPI, Form, File, UploadFile, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
-from playwright.async_api import async_playwright
+from playwright.sync_api import sync_playwright
 
 BASE_DIR     = Path(__file__).parent
 ROOT_DIR     = BASE_DIR.parent
@@ -62,24 +62,8 @@ async def lifespan(app: FastAPI):
                 print(f"[✓] Instagram logged in + session saved for @{IG_USER}")
         except Exception as ex:
             print(f"[!] Instagram login failed: {ex}")
-
-    # 2. Start Global Playwright Browser (Headless)
-    global playwright_manager, playwright_browser
-    try:
-        playwright_manager = await async_playwright().start()
-        playwright_browser = await playwright_manager.chromium.launch(headless=True)
-        print("[✓] Playwright Headless Browser initialized successfully")
-    except Exception as e:
-        print(f"[!] Playwright failed to start: {e}")
-
     yield  # ─── APP IS RUNNING ───
 
-    # 3. Shutdown routine
-    if playwright_browser:
-        await playwright_browser.close()
-    if playwright_manager:
-        await playwright_manager.stop()
-    print("[✓] Playwright Browser shut down cleanly")
 
 app = FastAPI(title="Vault", lifespan=lifespan)
 
@@ -408,53 +392,48 @@ async def fetch_pfp_api(username: str) -> bytes | None:
 
     return None
 
-
-# New Tier 2: Headless Incognito Browser Fallback
-# New Tier 2: Headless Incognito Browser Fallback (Reuses Global Browser)
-async def fetch_pfp_playwright(username: str) -> bytes | None:
-    global playwright_browser
-
-    if not playwright_browser:
-        logging.error("[playwright-fail] Browser is not running.")
-        return None
-
-    # Open a new fast, isolated incognito tab
-    context = await playwright_browser.new_context()
-    page = await context.new_page()
-
+# Runs in a ThreadPoolExecutor — completely isolated from asyncio loop
+def _playwright_fetch_sync(username: str) -> bytes | None:
     try:
-        await page.goto(f"https://www.instagram.com/{username}/", wait_until="domcontentloaded")
-
-        # Instagram loads the HD pfp inside the header tag
-        img_element = await page.wait_for_selector('header img', timeout=8000)
-
-        if img_element:
-            hd_url = await img_element.get_attribute('src')
-            if hd_url and "150x150" not in hd_url:
-                async with httpx.AsyncClient() as client:
-                    img_response = await client.get(hd_url, timeout=15.0)
-                    if img_response.status_code == 200 and check_image_size(img_response.content, username):
-                        return img_response.content
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context()
+            page = context.new_page()
+            try:
+                page.goto(
+                    f"https://www.instagram.com/{username}/",
+                    wait_until="domcontentloaded",
+                    timeout=15000
+                )
+                img_element = page.wait_for_selector('header img', timeout=8000)
+                if img_element:
+                    hd_url = img_element.get_attribute('src')
+                    if hd_url and "150x150" not in hd_url:
+                        r = httpx.get(hd_url, timeout=15.0, follow_redirects=True)
+                        if r.status_code == 200 and check_image_size(r.content, username):
+                            return r.content
+            except Exception as e:
+                logging.error(f"[playwright-fail] @{username} — {str(e)}")
+            finally:
+                context.close()
+                browser.close()
     except Exception as e:
-        logging.error(f"[playwright-fail] @{username} — {str(e)}")
-    finally:
-        # Close the tab immediately to free memory
-        await context.close()
-
+        logging.error(f"[playwright-outer-fail] @{username} — {str(e)}")
     return None
 
 
 # The new fetch and save orchestrator
 async def fetch_and_save_pfp(username: str, csv_pic_url: str, dest_dir: Path, safe_name: str) -> str | None:
-    # Try the fast API first
+    # Tier 1: Fast Hidden Web API
     data = await fetch_pfp_api(username)
 
     if data:
         print(f"[✅ SUCCESS] @{username} — Fetched via API")
     else:
-        # Fallback to Playwright if API fails
-        print(f"[fallback] @{username} — API failed, launching Playwright...")
-        data = await fetch_pfp_playwright(username)
+        # Tier 2: Playwright in a thread (avoids Windows asyncio conflict)
+        print(f"[fallback] @{username} — API failed, trying Playwright thread...")
+        loop = asyncio.get_event_loop()
+        data = await loop.run_in_executor(_executor, _playwright_fetch_sync, username)
         if data:
             print(f"[✅ SUCCESS] @{username} — Fetched via Playwright")
 
@@ -463,5 +442,5 @@ async def fetch_and_save_pfp(username: str, csv_pic_url: str, dest_dir: Path, sa
         (dest_dir / filename).write_bytes(data)
         return f"/storage/{safe_name}/ig_pics/{filename}"
 
-    print(f"[❌ NO HD] @{username} — All modern tiers failed")
+    print(f"[❌ NO HD] @{username} — All tiers failed")
     return None
