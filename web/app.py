@@ -5,7 +5,11 @@ import re
 import httpx
 import instaloader
 import asyncio
+import os
+import time
+import random
 
+from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, Form, File, UploadFile, HTTPException
 from fastapi.responses import HTMLResponse
@@ -288,9 +292,16 @@ async def api_ig_import(
     pic_dir.mkdir(parents=True, exist_ok=True)
 
     async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-        for (uname, fname, pic_url) in entries:
+        for i, (uname, fname, pic_url) in enumerate(entries):
             local_path = None
 
+            # pause every 20 users
+            if i > 0 and i % 20 == 0:
+                print(f"[pause] {i}/{len(entries)} done — sleeping 10s")
+                await asyncio.sleep(10)
+
+            local_path = None
+            
             # ── Try HD via instaloader first ──
             filename = await fetch_and_save_pfp(uname, pic_dir)
 
@@ -346,15 +357,22 @@ def api_ig_delete_snapshot(sid: int):
     delete_ig_snapshot(sid)
     return {"ok": True}
 
+
 def _fetch_pfp_sync(username: str) -> bytes | None:
-    """Runs in thread — instaloader is sync."""
     try:
+        time.sleep(random.uniform(1.5, 3.5))   # ← random delay every user
+
         profile = instaloader.Profile.from_username(_il.context, username)
         url = profile.profile_pic_url
-        import httpx
         r = httpx.get(url, timeout=10, follow_redirects=True)
         if r.status_code == 200:
             return r.content
+
+    except instaloader.exceptions.ProfileNotExistsException:
+        print(f"[skip] {username} — deleted/private/renamed")
+    except instaloader.exceptions.ConnectionException as ex:
+        print(f"[rate-limit] {username} — sleeping 30s: {ex}")
+        time.sleep(30)   # ← hard back-off on rate limit
     except Exception as ex:
         print(f"[warn] HD pfp failed for {username}: {ex}")
     return None
