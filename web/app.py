@@ -303,11 +303,12 @@ async def api_ig_import(
     await asyncio.sleep(random.uniform(1.5, 4))
 
     for i, (uname, fname, pic_url) in enumerate(entries):
+        await asyncio.sleep(random.uniform(1.5, 3.5))
         if i > 0 and i % 20 == 0:
             print(f"[pause] {i}/{len(entries)} done — sleeping 10s")
             await asyncio.sleep(10)
 
-        local_path = await fetch_and_save_pfp(uname, pic_url, pic_dir, safe_name)
+        local_path, pic_url = await fetch_and_save_pfp(uname, pic_dir)
 
         if local_path:
             hd_count += 1
@@ -385,9 +386,7 @@ def check_image_size(data: bytes, username: str) -> bool:
 
 
 # ─── Tier 1: Direct API ───────────────────────────────────────────────────────
-
-async def fetch_pfp_api(username: str) -> bytes | None:
-    # Prefer fresh browser session cookies, fall back to Instaloader
+async def fetch_pfp_api(username: str):
     ig_cookies = _get_browser_cookies()
     if not ig_cookies:
         try:
@@ -395,43 +394,32 @@ async def fetch_pfp_api(username: str) -> bytes | None:
         except Exception:
             pass
 
-    web_headers = {
+    headers = {
         "accept": "*/*",
         "accept-language": "en-US,en;q=0.9",
         "x-ig-app-id": "936619743392459",
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/122.0.0.0 Safari/537.36"
-        ),
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     }
 
     async with httpx.AsyncClient(cookies=ig_cookies) as client:
         try:
             r = await client.get(
                 f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}",
-                headers=web_headers,
-                timeout=10.0,
+                headers=headers, timeout=10.0,
             )
             print(f"[api-status] @{username} — HTTP {r.status_code}")
-
             if r.status_code != 200:
                 print(f"[api-fail] @{username} — Status: {r.status_code}")
-                return None
+                return None, None
 
             user = r.json().get("data", {}).get("user", {})
             if not user:
                 print(f"[api-empty] @{username} — no user in response")
-                return None
+                return None, None
 
-            # Pick largest from hd_profile_pic_versions
             versions = user.get("hd_profile_pic_versions") or []
-            best_version_url = (
-                max(versions, key=lambda x: x.get("width", 0)).get("url")
-                if versions else None
-            )
+            best_version_url = max(versions, key=lambda x: x.get("width", 0)).get("url") if versions else None
 
-            # Full fallback chain — best field first
             hd_url = (
                 user.get("hd_profile_pic_url_info", {}).get("url")
                 or best_version_url
@@ -441,38 +429,34 @@ async def fetch_pfp_api(username: str) -> bytes | None:
 
             if not hd_url:
                 print(f"[api-nourl] @{username} — no pic URL in response")
-                return None
+                return None, None
 
             print(f"[api-url] @{username} — {hd_url}")
             img = await client.get(hd_url, timeout=15.0, follow_redirects=True)
             if img.status_code == 200 and check_image_size(img.content, username):
-                return img.content
+                return img.content, hd_url
             else:
                 print(f"[api-img-fail] @{username} — img HTTP {img.status_code}")
 
         except Exception as e:
             print(f"[api-error] @{username} — {e}")
 
-    return None
+    return None, None
 
 
-# ─── Tier 1 with Retry ────────────────────────────────────────────────────────
-
-async def fetch_pfp_api_with_retry(username: str) -> bytes | None:
+async def fetch_pfp_api_with_retry(username: str):
     for attempt in range(2):
-        data = await fetch_pfp_api(username)
+        data, url = await fetch_pfp_api(username)
         if data:
-            return data
+            return data, url
         if attempt == 0:
-            wait = random.uniform(2, 5)
+            # Check if last call was rate-limited — wait longer
+            wait = random.uniform(8, 15)   # was 2-5, now 8-15 for 429 recovery
             print(f"[api-retry] @{username} — retrying in {wait:.1f}s")
             await asyncio.sleep(wait)
-    return None
+    return None, None
 
-
-# ─── Tier 2: Playwright (intercepts browser's own signed API call) ─────────────
-
-def _playwright_fetch_sync(username: str) -> bytes | None:
+def _playwright_fetch_sync(username: str):
     print(f"[debug] STATE_FILE = {STATE_FILE}, exists = {STATE_FILE.exists()}")
     captured_url = None
 
@@ -483,10 +467,7 @@ def _playwright_fetch_sync(username: str) -> bytes | None:
                 data = response.json()
                 user = data.get("data", {}).get("user", {})
                 versions = user.get("hd_profile_pic_versions") or []
-                best_version_url = (
-                    max(versions, key=lambda x: x.get("width", 0)).get("url")
-                    if versions else None
-                )
+                best_version_url = max(versions, key=lambda x: x.get("width", 0)).get("url") if versions else None
                 captured_url = (
                     user.get("hd_profile_pic_url_info", {}).get("url")
                     or best_version_url
@@ -500,82 +481,70 @@ def _playwright_fetch_sync(username: str) -> bytes | None:
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--disable-blink-features=AutomationControlled"],
-            )
+            browser = p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"])
 
             if STATE_FILE.exists():
                 context = browser.new_context(
                     storage_state=str(STATE_FILE),
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/122.0.0.0 Safari/537.36"
-                    ),
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
                 )
                 print(f"[playwright] Loaded saved browser session")
             else:
                 context = browser.new_context(
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/122.0.0.0 Safari/537.36"
-                    )
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
                 )
-                # Fallback: inject Instaloader cookies
                 try:
                     ig_cookies = [
-                        {"name": c.name, "value": c.value,
-                         "domain": ".instagram.com", "path": "/"}
+                        {"name": c.name, "value": c.value, "domain": ".instagram.com", "path": "/"}
                         for c in _il.context._session.cookies if c.value
                     ]
                     context.add_cookies(ig_cookies)
-                    print(f"[playwright] No state file — injected {len(ig_cookies)} cookies")
+                    print(f"[playwright] Injected {len(ig_cookies)} fallback cookies")
                 except Exception as e:
                     print(f"[playwright-cookie-warn] {e}")
 
             page = context.new_page()
-            page.on("response", on_response)  # must attach BEFORE goto
+            page.on("response", on_response)
 
             try:
-                page.goto(
-                    f"https://www.instagram.com/{username}/",
-                    wait_until="domcontentloaded",
-                    timeout=15000,
-                )
+                page.goto(f"https://www.instagram.com/{username}/", wait_until="domcontentloaded", timeout=15000)
 
-                # Check for login wall or unavailable page
-                page_text = page.content()
-                if "This Account is Private" in page_text or "Sorry, this page" in page_text:
+                content = page.content()
+                if "This Account is Private" in content or "Sorry, this page" in content:
                     print(f"[playwright-private] @{username} — private/unavailable")
-                    return None
+                    return None, None
 
-                # Give background API calls time to fire and be intercepted
                 page.wait_for_timeout(4000)
 
                 if not captured_url:
+                    # DOM fallback — grab header img src directly
+                    print(f"[playwright-dom-fallback] @{username} — trying header img")
+                    try:
+                        img_el = page.query_selector("header img")
+                        if img_el:
+                            captured_url = img_el.get_attribute("src")
+                            if captured_url:
+                                print(f"[playwright-dom] @{username} — got src from DOM")
+                    except Exception as dom_err:
+                        print(f"[playwright-dom-err] @{username} — {dom_err}")
+
                     page.screenshot(path=f"debug_{username}.png")
-                    print(f"[playwright-fail] @{username} — no API response intercepted, screenshot saved")
-                    return None
+                    print(f"[playwright-fail] @{username} — no API response intercepted")
+                    return None, None
 
                 print(f"[playwright-url] @{username} — {captured_url}")
 
-                # Download image in same authenticated context
                 img_page = context.new_page()
                 try:
-                    img_response = img_page.goto(
-                        captured_url, wait_until="commit", timeout=10000
-                    )
-                    if img_response and img_response.ok:
-                        data = img_response.body()
+                    img_resp = img_page.goto(captured_url, wait_until="commit", timeout=10000)
+                    if img_resp and img_resp.ok:
+                        data = img_resp.body()
                         if check_image_size(data, username):
-                            return data
+                            return data, captured_url
                     else:
-                        status = img_response.status if img_response else "no response"
-                        print(f"[playwright-img-fail] @{username} — HTTP {status}")
-                except Exception as img_err:
-                    print(f"[playwright-img-error] @{username} — {img_err}")
+                        print(f"[playwright-img-fail] @{username} — HTTP {img_resp.status if img_resp else 'none'}")
+                except Exception as e:
+                    print(f"[playwright-img-error] @{username} — {e}")
                 finally:
                     img_page.close()
 
@@ -589,41 +558,32 @@ def _playwright_fetch_sync(username: str) -> bytes | None:
         print(f"[playwright-crash] @{username} — {e}")
         traceback.print_exc()
 
-    return None
+    return None, None
 
 
-# ─── Orchestrator ─────────────────────────────────────────────────────────────
+async def fetch_and_save_pfp(username: str, save_dir: Path):
+    # Tier 1: API
+    data, pic_url = await fetch_pfp_api_with_retry(username)
 
-async def fetch_and_save_pfp(username: str, save_dir: Path) -> str | None:
-    """
-    Tries API tier first, then Playwright tier.
-    Returns local file path on success, None on failure.
-    """
-    # Tier 1: Direct API
-    data = await fetch_pfp_api_with_retry(username)
-
-    # Tier 2: Playwright (for .experimental accounts and private pages)
+    # Tier 2: Playwright
     if not data:
         print(f"[fallback] @{username} — API failed, trying Playwright thread...")
         try:
             loop = asyncio.get_event_loop()
-            data = await loop.run_in_executor(
-                _executor, _playwright_fetch_sync, username
-            )
+            data, pic_url = await loop.run_in_executor(_executor, _playwright_fetch_sync, username)
             if data:
                 print(f"[✅ SUCCESS] @{username} — Fetched via Playwright")
-        except Exception as thread_err:
-            print(f"[playwright-thread-crash] @{username} — {thread_err}")
+        except Exception as e:
+            print(f"[playwright-thread-crash] @{username} — {e}")
             traceback.print_exc()
 
     if not data:
         print(f"[❌ NO HD] @{username} — All tiers failed")
-        return None
+        return None, None
 
-    # Save to disk
     save_dir.mkdir(parents=True, exist_ok=True)
     safe_name = username.replace(".", "_").replace("/", "_")
     out_path = save_dir / f"{safe_name}.jpg"
     out_path.write_bytes(data)
-    print(f"[✅ SUCCESS] @{username} — Saved to {out_path}")
-    return str(out_path)
+    print(f"[✅ SAVED] @{username} — {out_path}")
+    return str(out_path), pic_url
