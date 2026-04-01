@@ -6,7 +6,6 @@ import httpx
 import instaloader
 import asyncio
 import os
-import time
 import io as _io
 import logging
 
@@ -24,9 +23,6 @@ ROOT_DIR     = BASE_DIR.parent
 FRONTEND_DIR = ROOT_DIR / "frontend"
 STORAGE_DIR  = ROOT_DIR / "storage"
 MIN_PFP_SIZE = 150  # reject anything smaller than 300x300
-# NEW: Global Playwright and Browser variables
-playwright_manager = None
-playwright_browser = None
 
 load_dotenv()   # loads .env file automatically
 
@@ -403,18 +399,10 @@ def _playwright_fetch_sync(username: str) -> bytes | None:
             context = browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
             )
-
-            # Inject Instagram session cookies from the logged-in Instaloader session
             try:
                 ig_cookies = [
-                    {
-                        "name": c.name,
-                        "value": c.value,
-                        "domain": ".instagram.com",
-                        "path": "/",
-                    }
-                    for c in _il.context._session.cookies
-                    if c.value  # skip empty cookies
+                    {"name": c.name, "value": c.value, "domain": ".instagram.com", "path": "/"}
+                    for c in _il.context._session.cookies if c.value
                 ]
                 context.add_cookies(ig_cookies)
                 print(f"[playwright] Injected {len(ig_cookies)} session cookies")
@@ -422,35 +410,29 @@ def _playwright_fetch_sync(username: str) -> bytes | None:
                 print(f"[playwright-cookie-warn] Could not inject cookies: {e}")
 
             page = context.new_page()
-
             try:
-                page.goto(
-                    f"https://www.instagram.com/{username}/",
-                    wait_until="domcontentloaded",
-                    timeout=15000
-                )
-
-                # Should go straight to the profile — no login wall
+                page.goto(f"https://www.instagram.com/{username}/", wait_until="domcontentloaded", timeout=15000)
                 img_element = page.wait_for_selector('header img', timeout=8000)
                 if img_element:
                     hd_url = img_element.get_attribute('src')
                     print(f"[playwright-url] @{username} — {hd_url[:80] if hd_url else 'None'}")
                     if hd_url and "150x150" not in hd_url:
-                        r = httpx.get(hd_url, timeout=15.0, follow_redirects=True)
-                        if r.status_code == 200 and check_image_size(r.content, username):
-                            return r.content
-
+                        # ✅ Download using the browser's own session — not httpx
+                        img_response = page.request.get(hd_url)
+                        if img_response.ok:
+                            data = img_response.body()
+                            if check_image_size(data, username):
+                                return data
+                        else:
+                            print(f"[playwright-img-fail] @{username} — status {img_response.status}")
             except Exception as e:
                 print(f"[playwright-fail] @{username} — {str(e)}")
             finally:
                 context.close()
                 browser.close()
-
     except Exception as e:
         print(f"[playwright-outer-fail] @{username} — {str(e)}")
-
     return None
-
 
 # The new fetch and save orchestrator
 async def fetch_and_save_pfp(username: str, csv_pic_url: str, dest_dir: Path, safe_name: str) -> str | None:
