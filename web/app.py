@@ -280,8 +280,6 @@ async def api_ig_import(
     person_name = person_row[1] if person_row else f"person_{pid}"
     safe_name   = safe_folder_name(person_name)
 
-    # CSV columns: followed_by_viewer;full_name;id;is_verified;profile_pic_url;requested_by_viewer;username
-    # Try comma first, fallback to semicolon
     sample = csv_data[:500]
     delim = ';' if ';' in sample and ',' not in sample else ','
     reader = csv.DictReader(io.StringIO(csv_data), delimiter=delim)
@@ -300,37 +298,24 @@ async def api_ig_import(
     pic_dir = STORAGE_DIR / safe_name / "ig_pics"
     pic_dir.mkdir(parents=True, exist_ok=True)
 
-    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-        for i, (uname, fname, pic_url) in enumerate(entries):
-            local_path = None
+    hd_count       = 0
+    rejected_count = 0
 
-            # pause every 20 users
-            if i > 0 and i % 20 == 0:
-                print(f"[pause] {i}/{len(entries)} done — sleeping 10s")
-                await asyncio.sleep(10)
+    for i, (uname, fname, pic_url) in enumerate(entries):
+        if i > 0 and i % 20 == 0:
+            print(f"[pause] {i}/{len(entries)} done — sleeping 10s")
+            await asyncio.sleep(10)
 
-            local_path = None
+        local_path = await fetch_and_save_pfp(uname, pic_url, pic_dir, safe_name)
 
-            # ── Try HD via instaloader first ──
-            local_path = await fetch_and_save_pfp(uname, pic_url, pic_dir, safe_name)
+        if local_path:
+            hd_count += 1
+        else:
+            rejected_count += 1
 
-            if filename:
-                local_path = f"/storage/{safe_name}/ig_pics/{filename}"
+        add_ig_entry(sid, uname, fname, pic_url, local_path)
 
-            elif pic_url:
-                # ── Fallback: use extension's low-res URL ──
-                try:
-                    filename = f"{uname}_{uuid.uuid4().hex[:8]}.jpg"
-                    dest = pic_dir / filename
-                    r = await client.get(pic_url, follow_redirects=True)
-                    if r.status_code == 200:
-                        dest.write_bytes(r.content)
-                        local_path = f"/storage/{safe_name}/ig_pics/{filename}"
-                except Exception as ex:
-                    print(f"[warn] fallback pic failed for {uname}: {ex}")
-
-            add_ig_entry(sid, uname, fname, pic_url, local_path)
-
+    print(f"[import] Done — ✅ HD: {hd_count}  ❌ rejected/skipped: {rejected_count}  Total: {len(entries)}")
     return {"ok": True, "snapshot_id": sid, "count": len(entries)}
 
 
@@ -379,43 +364,68 @@ def check_image_size(data: bytes, username: str) -> bool:
         return False
 
 def _fetch_pfp_sync(username: str) -> bytes | None:
-    time.sleep(random.uniform(1.0, 2.5))
+    time.sleep(random.uniform(1.5, 3.0))
 
-    # ── Tier 1: Instaloader HD ──
+    # ── Tier 1: Instaloader HD (best quality, needs session) ──
     try:
         profile = instaloader.Profile.from_username(_il.context, username)
         hd_url  = getattr(profile, 'profile_pic_url_hd', None) or profile.profile_pic_url
-        r = httpx.get(hd_url, headers=BROWSER_HEADERS, timeout=10, follow_redirects=True)
+        r = httpx.get(hd_url, headers=BROWSER_HEADERS, timeout=15, follow_redirects=True)
         if r.status_code == 200 and check_image_size(r.content, username):
             return r.content
-        # size rejected — fall through to tier 2
+        print(f"[tier1-lowres] @{username} — instaloader returned low-res, trying scrape")
     except instaloader.exceptions.ProfileNotExistsException:
-        pass
+        print(f"[skip] @{username} — profile not found")
+        return None
     except instaloader.exceptions.ConnectionException as ex:
-        print(f"[rate-limit] @{username} — sleeping 30s: {ex}")
-        time.sleep(30)
+        print(f"[rate-limit] @{username} — sleeping 60s: {ex}")
+        time.sleep(60)
     except Exception as ex:
         print(f"[warn] tier1 @{username}: {ex}")
 
-    # ── Tier 2: ?__a=1 JSON scrape ──
+    # ── Tier 2: Scrape og:image from profile page HTML ──
     try:
-        time.sleep(random.uniform(0.5, 1.5))
+        time.sleep(random.uniform(1.0, 2.0))
+        headers = {
+            **BROWSER_HEADERS,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-User": "?1",
+            "Sec-Fetch-Dest": "document",
+            "Upgrade-Insecure-Requests": "1",
+        }
         r = httpx.get(
-            f"https://www.instagram.com/{username}/?__a=1&__d=dis",
-            headers=BROWSER_HEADERS, timeout=10, follow_redirects=True,
+            f"https://www.instagram.com/{username}/",
+            headers=headers,
+            timeout=15,
+            follow_redirects=True,
         )
         if r.status_code == 200:
-            user   = r.json().get("graphql", {}).get("user", {})
-            hd_url = user.get("profile_pic_url_hd") or user.get("profile_pic_url")
-            if hd_url:
-                img = httpx.get(hd_url, headers=BROWSER_HEADERS, timeout=10, follow_redirects=True)
+            # og:image contains the full CDN URL with real dimensions
+            import re as _re
+            match = _re.search(
+                r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\'](https://[^"\']+)["\']',
+                r.text,
+            ) or _re.search(
+                r'<meta[^>]+content=["\'](https://[^"\']+)["\'][^>]+property=["\']og:image["\']',
+                r.text,
+            )
+            if match:
+                og_url = match.group(1).replace("&amp;", "&")
+                img = httpx.get(og_url, headers=BROWSER_HEADERS, timeout=15, follow_redirects=True)
                 if img.status_code == 200 and check_image_size(img.content, username):
                     return img.content
+                print(f"[tier2-lowres] @{username} — og:image also low-res")
+            else:
+                print(f"[tier2-miss] @{username} — og:image not found in HTML (likely login wall)")
+        else:
+            print(f"[tier2-http] @{username} — status {r.status_code}")
     except Exception as ex:
         print(f"[warn] tier2 @{username}: {ex}")
 
-    # ── Tier 3: Reject ──
-    print(f"[❌ NO HD] @{username} — no HD pic available, skipping")
+    # ── Tier 3: No HD available ──
+    print(f"[❌ NO HD] @{username} — all tiers failed, skipping")
     return None
 
 async def fetch_and_save_pfp(username: str, csv_pic_url: str, dest_dir: Path, safe_name: str) -> str | None:
