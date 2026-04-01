@@ -25,7 +25,7 @@ BASE_DIR     = Path(__file__).parent
 ROOT_DIR     = BASE_DIR.parent
 FRONTEND_DIR = ROOT_DIR / "frontend"
 STORAGE_DIR  = ROOT_DIR / "storage"
-MIN_PFP_SIZE = 300  # reject anything smaller than 300x300
+MIN_PFP_SIZE = 150  # reject anything smaller than 300x300
 BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
@@ -388,7 +388,8 @@ def _fetch_pfp_sync(username: str) -> bytes | None:
                 _t1_failures += 1
                 print(f"[tier1-fail {_t1_failures}/{_T1_GIVE_UP}] @{username} — low-res or bad response")
         except instaloader.exceptions.ProfileNotExistsException:
-            print(f"[skip] @{username} — profile not found")
+            _t1_failures += 1
+            print(f"[tier1-fail {_t1_failures}/{_T1_GIVE_UP}] @{username} — ProfileNotFound (likely rate-limited)")
             return None
         except instaloader.exceptions.ConnectionException as ex:
             _t1_failures += 1
