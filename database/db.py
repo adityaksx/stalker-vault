@@ -1,8 +1,6 @@
 import sqlite3
-from os import uname
 from pathlib import Path
 
-import e
 
 DB_PATH = Path(__file__).parent / "vault.db"
 
@@ -228,7 +226,7 @@ def delete_ig_snapshot(snapshot_id: int):
         try:
             Path(p).unlink(missing_ok=True)
         except Exception:
-            print(f"[warn] pic download failed for {uname}: {e}")
+            print(f"[warn] could not delete pic {p}: {ex}")
             pass
 
 def get_media_by_id(media_id: int):
