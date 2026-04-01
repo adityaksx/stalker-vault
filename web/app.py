@@ -396,29 +396,59 @@ async def fetch_pfp_api(username: str) -> bytes | None:
 def _playwright_fetch_sync(username: str) -> bytes | None:
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context()
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--disable-blink-features=AutomationControlled"]
+            )
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            )
+
+            # Inject Instagram session cookies from the logged-in Instaloader session
+            try:
+                ig_cookies = [
+                    {
+                        "name": c.name,
+                        "value": c.value,
+                        "domain": ".instagram.com",
+                        "path": "/",
+                    }
+                    for c in _il.context._session.cookies
+                    if c.value  # skip empty cookies
+                ]
+                context.add_cookies(ig_cookies)
+                print(f"[playwright] Injected {len(ig_cookies)} session cookies")
+            except Exception as e:
+                print(f"[playwright-cookie-warn] Could not inject cookies: {e}")
+
             page = context.new_page()
+
             try:
                 page.goto(
                     f"https://www.instagram.com/{username}/",
                     wait_until="domcontentloaded",
                     timeout=15000
                 )
+
+                # Should go straight to the profile — no login wall
                 img_element = page.wait_for_selector('header img', timeout=8000)
                 if img_element:
                     hd_url = img_element.get_attribute('src')
+                    print(f"[playwright-url] @{username} — {hd_url[:80] if hd_url else 'None'}")
                     if hd_url and "150x150" not in hd_url:
                         r = httpx.get(hd_url, timeout=15.0, follow_redirects=True)
                         if r.status_code == 200 and check_image_size(r.content, username):
                             return r.content
+
             except Exception as e:
-                logging.error(f"[playwright-fail] @{username} — {str(e)}")
+                print(f"[playwright-fail] @{username} — {str(e)}")
             finally:
                 context.close()
                 browser.close()
+
     except Exception as e:
-        logging.error(f"[playwright-outer-fail] @{username} — {str(e)}")
+        print(f"[playwright-outer-fail] @{username} — {str(e)}")
+
     return None
 
 
