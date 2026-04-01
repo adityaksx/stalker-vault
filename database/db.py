@@ -41,6 +41,7 @@ def init_db():
     )""")
     conn.commit()
     conn.close()
+    init_ig_tables()
 
 # ── People ──
 def create_person(name: str) -> int:
@@ -214,3 +215,9 @@ def delete_ig_snapshot(snapshot_id):
     c = conn.cursor()
     c.execute("DELETE FROM ig_snapshots WHERE id=?", (snapshot_id,))
     conn.commit(); conn.close()
+
+def get_media_by_id(media_id: int):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM media WHERE id=?", (media_id,))
+    row = c.fetchone(); conn.close(); return row
