@@ -365,7 +365,6 @@ def check_image_size(data: bytes, username: str) -> bool:
 
 # New Tier 1: Fast Hidden Web API (No login required)
 async def fetch_pfp_api(username: str) -> bytes | None:
-    # Use fresh browser session cookies, fall back to Instaloader
     ig_cookies = _get_browser_cookies()
     if not ig_cookies:
         try:
@@ -373,53 +372,49 @@ async def fetch_pfp_api(username: str) -> bytes | None:
         except Exception:
             pass
 
-    web_headers = {
+    headers = {
         "accept": "*/*",
         "accept-language": "en-US,en;q=0.9",
         "x-ig-app-id": "936619743392459",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
-    mobile_headers = {
-        "User-Agent": "Instagram 219.0.0.12.117 Android (28/9; 380dpi; 1080x2061; OnePlus; GM1910; OnePlus7Pro; qcom; en_US; 302733750)",
-        "x-ig-app-id": "567067343352427",
-        "Accept-Language": "en-US",
-    }
 
     async with httpx.AsyncClient(cookies=ig_cookies) as client:
         try:
-            r1 = await client.get(
+            r = await client.get(
                 f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}",
-                headers=web_headers,
+                headers=headers,
                 timeout=10.0
             )
-            print(f"[api-status] @{username} — HTTP {r1.status_code}")
-            if r1.status_code != 200:
-                print(f"[api-fail] @{username} — Status: {r1.status_code}")
+            print(f"[api-status] @{username} — HTTP {r.status_code}")
+
+            if r.status_code != 200:
+                print(f"[api-fail] @{username} — Status: {r.status_code}")
                 return None
 
-            user_id = r1.json().get("data", {}).get("user", {}).get("id")
-            if not user_id:
-                print(f"[api-nouid] @{username} — could not get user ID")
+            user = r.json().get("data", {}).get("user", {})
+            if not user:
+                print(f"[api-empty] @{username} — no user in response")
                 return None
 
-            r2 = await client.get(
-                f"https://i.instagram.com/api/v1/users/{user_id}/info/",
-                headers=mobile_headers,
-                timeout=10.0
+            # Full fallback chain — newest fields first
+            hd_url = (
+                user.get("hd_profile_pic_url_info", {}).get("url")
+                or (user.get("hd_profile_pic_versions") or [{}])[-1].get("url")
+                or user.get("profile_pic_url_hd")
+                or user.get("profile_pic_url")
             )
-            print(f"[mobile-api] @{username} — HTTP {r2.status_code}")
-            if r2.status_code != 200:
-                print(f"[mobile-fail] @{username} — Status: {r2.status_code}")
-                return None
 
-            hd_url = r2.json().get("user", {}).get("hd_profile_pic_url_info", {}).get("url")
             if not hd_url:
-                print(f"[api-nourl] @{username} — no hd_profile_pic_url_info")
+                print(f"[api-nourl] @{username} — no pic URL found in response")
                 return None
 
+            print(f"[api-url] @{username} — {hd_url}")
             img = await client.get(hd_url, timeout=15.0, follow_redirects=True)
             if img.status_code == 200 and check_image_size(img.content, username):
                 return img.content
+            else:
+                print(f"[api-img-fail] @{username} — img HTTP {img.status_code}")
 
         except Exception as e:
             print(f"[api-error] @{username} — {str(e)}")
@@ -482,7 +477,7 @@ def _playwright_fetch_sync(username: str) -> bytes | None:
                     return None
 
                 hd_url = img_element.get_attribute('src')
-                print(f"[playwright-url] @{username} — {hd_url[:80] if hd_url else 'None'}")
+                print(f"[playwright-url] @{username} — {hd_url}")
                 if hd_url and "150x150" not in hd_url:
                     img_response = page.request.get(hd_url)
                     if img_response.ok:
