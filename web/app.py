@@ -220,15 +220,6 @@ def api_ig_snapshots(pid: int):
         for r in rows
     ]}
 
-@app.get("/api/ig-snapshots/{sid}/entries")
-def api_ig_entries(sid: int):
-    from database.db import get_ig_entries
-    rows = get_ig_entries(sid)
-    return {"entries": [
-        {"id":r[0],"username":r[1],"full_name":r[2],"profile_pic_url":r[3],"local_pic_path":r[4]}
-        for r in rows
-    ]}
-
 @app.post("/api/people/{pid}/ig-snapshots")
 async def api_ig_import(
     pid: int,
@@ -245,7 +236,10 @@ async def api_ig_import(
     safe_name   = safe_folder_name(person_name)
 
     # CSV columns: followed_by_viewer;full_name;id;is_verified;profile_pic_url;requested_by_viewer;username
-    reader  = csv.DictReader(io.StringIO(csv_data), delimiter=';')
+    # Try comma first, fallback to semicolon
+    sample = csv_data[:500]
+    delim = ';' if ';' in sample and ',' not in sample else ','
+    reader = csv.DictReader(io.StringIO(csv_data), delimiter=delim)
     entries = []
     for row in reader:
         uname = (row.get('username') or '').strip().strip('"')
@@ -295,6 +289,15 @@ def api_ig_diff(old_sid: int, new_sid: int):
         "old_count":  len(old_set),
         "new_count":  len(new_set),
     }
+
+@app.get("/api/ig-snapshots/{sid}/entries")
+def api_ig_entries(sid: int):
+    from database.db import get_ig_entries
+    rows = get_ig_entries(sid)
+    return {"entries": [
+        {"id":r[0],"username":r[1],"full_name":r[2],"profile_pic_url":r[3],"local_pic_path":r[4]}
+        for r in rows
+    ]}
 
 @app.delete("/api/ig-snapshots/{sid}")
 def api_ig_delete_snapshot(sid: int):
