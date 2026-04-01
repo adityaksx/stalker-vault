@@ -467,7 +467,10 @@ def _playwright_fetch_sync(username: str):
                 data = response.json()
                 user = data.get("data", {}).get("user", {})
                 versions = user.get("hd_profile_pic_versions") or []
-                best_version_url = max(versions, key=lambda x: x.get("width", 0)).get("url") if versions else None
+                best_version_url = (
+                    max(versions, key=lambda x: x.get("width", 0)).get("url")
+                    if versions else None
+                )
                 captured_url = (
                     user.get("hd_profile_pic_url_info", {}).get("url")
                     or best_version_url
@@ -475,74 +478,129 @@ def _playwright_fetch_sync(username: str):
                     or user.get("profile_pic_url")
                 )
                 if captured_url:
-                    print(f"[playwright-intercept] @{username} — captured URL")
+                    print(f"[playwright-intercept] @{username} — captured URL via response listener")
             except Exception as e:
                 print(f"[playwright-intercept-err] @{username} — {e}")
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"])
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--disable-blink-features=AutomationControlled"],
+            )
 
             if STATE_FILE.exists():
                 context = browser.new_context(
                     storage_state=str(STATE_FILE),
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/122.0.0.0 Safari/537.36"
+                    ),
                 )
-                print(f"[playwright] Loaded saved browser session")
+                print(f"[playwright] Loaded saved browser session from {STATE_FILE.name}")
             else:
                 context = browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/122.0.0.0 Safari/537.36"
+                    )
                 )
                 try:
                     ig_cookies = [
-                        {"name": c.name, "value": c.value, "domain": ".instagram.com", "path": "/"}
+                        {"name": c.name, "value": c.value,
+                         "domain": ".instagram.com", "path": "/"}
                         for c in _il.context._session.cookies if c.value
                     ]
                     context.add_cookies(ig_cookies)
-                    print(f"[playwright] Injected {len(ig_cookies)} fallback cookies")
+                    print(f"[playwright] No state file — injected {len(ig_cookies)} fallback cookies")
                 except Exception as e:
                     print(f"[playwright-cookie-warn] {e}")
 
             page = context.new_page()
-            page.on("response", on_response)
+            page.on("response", on_response)  # must be before goto
 
             try:
-                page.goto(f"https://www.instagram.com/{username}/", wait_until="domcontentloaded", timeout=15000)
+                page.goto(
+                    f"https://www.instagram.com/{username}/",
+                    wait_until="domcontentloaded",
+                    timeout=15000,
+                )
 
+                # Check for login wall or unavailable page
                 content = page.content()
                 if "This Account is Private" in content or "Sorry, this page" in content:
                     print(f"[playwright-private] @{username} — private/unavailable")
                     return None, None
 
-                page.wait_for_timeout(4000)
+                # Give background XHRs time to fire and be intercepted
+                page.wait_for_timeout(3000)
 
+                # Tier 2b: page.evaluate — call API directly from inside browser
+                # Uses browser's own cookies via credentials:include, bypasses external 429
                 if not captured_url:
-                    # DOM fallback — grab header img src directly
-                    print(f"[playwright-dom-fallback] @{username} — trying header img")
+                    print(f"[playwright-evaluate] @{username} — calling API from browser context")
                     try:
-                        img_el = page.query_selector("header img")
-                        if img_el:
-                            captured_url = img_el.get_attribute("src")
-                            if captured_url:
-                                print(f"[playwright-dom] @{username} — got src from DOM")
-                    except Exception as dom_err:
-                        print(f"[playwright-dom-err] @{username} — {dom_err}")
+                        result = page.evaluate(f"""
+                            async () => {{
+                                const r = await fetch(
+                                    'https://www.instagram.com/api/v1/users/web_profile_info/?username={username}',
+                                    {{
+                                        headers: {{
+                                            'x-ig-app-id': '936619743392459',
+                                            'accept': '*/*',
+                                        }},
+                                        credentials: 'include'
+                                    }}
+                                );
+                                if (!r.ok) return {{ error: r.status }};
+                                const data = await r.json();
+                                const user = data?.data?.user || {{}};
+                                const versions = user.hd_profile_pic_versions || [];
+                                const best = versions.sort((a, b) => b.width - a.width)[0]?.url || null;
+                                return {{
+                                    hd_info: user.hd_profile_pic_url_info?.url || null,
+                                    best_version: best,
+                                    hd: user.profile_pic_url_hd || null,
+                                    sd: user.profile_pic_url || null
+                                }};
+                            }}
+                        """)
+                        print(f"[playwright-evaluate-result] @{username} — {result}")
+                        if result and not result.get("error"):
+                            captured_url = (
+                                result.get("hd_info")
+                                or result.get("best_version")
+                                or result.get("hd")
+                                or result.get("sd")
+                            )
+                        elif result and result.get("error"):
+                            print(f"[playwright-evaluate-fail] @{username} — API returned HTTP {result['error']}")
+                    except Exception as e:
+                        print(f"[playwright-evaluate-err] @{username} — {e}")
 
+                # All methods exhausted
+                if not captured_url:
                     page.screenshot(path=f"debug_{username}.png")
-                    print(f"[playwright-fail] @{username} — no API response intercepted")
+                    print(f"[playwright-fail] @{username} — all methods exhausted, screenshot saved")
                     return None, None
 
                 print(f"[playwright-url] @{username} — {captured_url}")
 
+                # Download image inside same authenticated context
                 img_page = context.new_page()
                 try:
-                    img_resp = img_page.goto(captured_url, wait_until="commit", timeout=10000)
+                    img_resp = img_page.goto(
+                        captured_url, wait_until="commit", timeout=10000
+                    )
                     if img_resp and img_resp.ok:
                         data = img_resp.body()
                         if check_image_size(data, username):
                             return data, captured_url
                     else:
-                        print(f"[playwright-img-fail] @{username} — HTTP {img_resp.status if img_resp else 'none'}")
+                        status = img_resp.status if img_resp else "no response"
+                        print(f"[playwright-img-fail] @{username} — HTTP {status}")
                 except Exception as e:
                     print(f"[playwright-img-error] @{username} — {e}")
                 finally:
