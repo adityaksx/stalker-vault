@@ -6,3 +6,4 @@ __pycache__/
 .DS_Store
 .idea/
 .ig_session
+web/ig_browser_state.json
