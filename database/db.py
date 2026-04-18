@@ -4,6 +4,8 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "vault.db"
 
+CATEGORIES = ["friend", "close_friend", "related", "random", "archived"]
+
 def get_connection():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
     conn.execute("PRAGMA foreign_keys = ON")
@@ -16,10 +18,16 @@ def init_db():
     c = conn.cursor()
     c.execute("""
     CREATE TABLE IF NOT EXISTS people (
-        id       INTEGER PRIMARY KEY AUTOINCREMENT,
-        name     TEXT NOT NULL,
-        added_at TEXT DEFAULT (datetime('now','localtime'))
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        name       TEXT NOT NULL,
+        added_at   TEXT DEFAULT (datetime('now','localtime')),
+        category   TEXT DEFAULT 'random'
     )""")
+    # Migration: add category column if it doesn't exist yet (for existing DBs)
+    try:
+        c.execute("ALTER TABLE people ADD COLUMN category TEXT DEFAULT 'random'")
+    except Exception:
+        pass  # column already exists — safe to ignore
     c.execute("""
     CREATE TABLE IF NOT EXISTS fields (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,10 +55,12 @@ def init_db():
     init_ig_tables()
 
 # ── People ──
-def create_person(name: str) -> int:
+def create_person(name: str, category: str = "random") -> int:
+    if category not in CATEGORIES:
+        category = "random"
     conn = get_connection()
     c = conn.cursor()
-    c.execute("INSERT INTO people (name) VALUES (?)", (name,))
+    c.execute("INSERT INTO people (name, category) VALUES (?, ?)", (name, category))
     pid = c.lastrowid
     conn.commit(); conn.close()
     return pid
@@ -62,7 +72,8 @@ def get_all_people():
         SELECT p.id, p.name, p.added_at,
                (SELECT value FROM fields WHERE person_id=p.id AND field_type='instagram' LIMIT 1),
                (SELECT path  FROM media  WHERE person_id=p.id AND media_type='profile_pic' LIMIT 1),
-               (SELECT value FROM fields WHERE person_id=p.id AND field_type='tag' LIMIT 1)
+               (SELECT value FROM fields WHERE person_id=p.id AND field_type='tag' LIMIT 1),
+               COALESCE(p.category, 'random')
         FROM people p ORDER BY p.id DESC
     """)
     rows = c.fetchall(); conn.close()
@@ -71,7 +82,7 @@ def get_all_people():
 def get_person(pid: int):
     conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT id, name, added_at FROM people WHERE id=?", (pid,))
+    c.execute("SELECT id, name, added_at, COALESCE(category, 'random') FROM people WHERE id=?", (pid,))
     row = c.fetchone(); conn.close()
     return row
 
@@ -85,6 +96,14 @@ def update_person_name(pid: int, name: str):
     conn = get_connection()
     c = conn.cursor()
     c.execute("UPDATE people SET name=? WHERE id=?", (name, pid))
+    conn.commit(); conn.close()
+
+def update_person_category(pid: int, category: str):
+    if category not in CATEGORIES:
+        category = "random"
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE people SET category=? WHERE id=?", (category, pid))
     conn.commit(); conn.close()
 
 # ── Fields ──
@@ -216,30 +235,25 @@ def get_ig_entries(snapshot_id):
 def delete_ig_snapshot(snapshot_id: int):
     conn = get_connection()
     c = conn.cursor()
-    # Fetch local pic paths before cascade delete
     c.execute("SELECT local_pic_path FROM ig_entries WHERE snapshot_id=?", (snapshot_id,))
     pic_paths = [r[0] for r in c.fetchall() if r[0]]
     c.execute("DELETE FROM ig_snapshots WHERE id=?", (snapshot_id,))
     conn.commit()
     conn.close()
-    # Clean files from disk
     for p in pic_paths:
         try:
             Path(p).unlink(missing_ok=True)
         except Exception:
-            print(f"[warn] could not delete pic {p}: {ex}")
             pass
 
 def get_media_by_id(media_id: int):
     conn = get_connection()
-    conn.row_factory = sqlite3.Row   # ← add this
+    conn.row_factory = sqlite3.Row
     c = conn.cursor()
     c.execute("SELECT * FROM media WHERE id=?", (media_id,))
     row = c.fetchone()
     conn.close()
     return row
-
-# ADD this new function:
 
 def update_media_path(media_id: int, path: str, local_path: str):
     conn = get_connection()
