@@ -179,6 +179,31 @@
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- Change Category Modal -->
+<div class="modal-overlay" id="cat-modal">
+  <div class="modal" role="dialog" aria-modal="true">
+    <h2>🏷 Change Category</h2>
+    <form id="cat-form">
+      <div class="form-group">
+        <label>Category</label>
+        <select id="cat-select" name="category">
+          <option value="friend">👋 Friends</option>
+          <option value="close_friend">💛 Close Friends</option>
+          <option value="related">🔗 Related to Friend/Close Friend</option>
+          <option value="random">🌐 Random (Found Online)</option>
+          <option value="misc">🗂️ Misc.</option>
+          <option value="archived">📦 Archived</option>
+        </select>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" id="cat-modal-close">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save →</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script src="/static/person.js"></script>
 </body>
 </html>
