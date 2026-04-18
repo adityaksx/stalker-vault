@@ -3,7 +3,6 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <meta name="description" content="Vault – personal people tracker"/>
   <title>Vault</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -20,28 +19,35 @@
 </header>
 
 <div class="page">
-  <div class="page-header">
-    <h1>People</h1>
-    <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
-      <input id="search-input" type="text" class="search-input" placeholder="🔍 Search name, handle, tag..."/>
-      <button class="btn btn-primary" id="add-btn">＋ Add Person</button>
+  <!-- HOME VIEW: 6 category cards -->
+  <div id="home-view">
+    <div class="page-header">
+      <h1>People</h1>
+      <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
+        <input id="search-input" type="text" class="search-input" placeholder="🔍 Search name, handle, tag..."/>
+        <button class="btn btn-primary" id="add-btn">＋ Add Person</button>
+      </div>
     </div>
+    <div id="category-grid" class="category-grid"></div>
   </div>
 
-  <!-- Category filter tabs -->
-  <div class="cat-filter-bar" id="cat-filter-bar">
-    <button class="cat-tab active" data-cat="all">All</button>
-    <button class="cat-tab" data-cat="friend">Friend</button>
-    <button class="cat-tab" data-cat="close_friend">Close Friend</button>
-    <button class="cat-tab" data-cat="related">Related</button>
-    <button class="cat-tab" data-cat="random">Random</button>
-    <button class="cat-tab" data-cat="archived">Archived</button>
+  <!-- CATEGORY VIEW: list of people in a category -->
+  <div id="category-view" style="display:none;">
+    <div class="page-header">
+      <div style="display:flex;align-items:center;gap:1rem;">
+        <button class="btn btn-secondary btn-sm" id="back-btn">← Back</button>
+        <h1 id="cat-view-title"></h1>
+      </div>
+      <div style="display:flex; gap:0.75rem; align-items:center;">
+        <input id="cat-search-input" type="text" class="search-input" placeholder="🔍 Search..."/>
+        <button class="btn btn-primary" id="add-btn-2">＋ Add Person</button>
+      </div>
+    </div>
+    <div id="people-grid" class="people-grid"></div>
   </div>
-
-  <div id="people-grid" class="people-grid"></div>
 </div>
 
-<!-- Modal -->
+<!-- Add Person Modal -->
 <div class="modal-overlay" id="add-modal">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <h2 id="modal-title">✨ New Person</h2>
@@ -52,12 +58,13 @@
       </div>
       <div class="form-group">
         <label>Category</label>
-        <select name="category">
-          <option value="random">🌐 Random (found online)</option>
-          <option value="friend">👋 Friend</option>
-          <option value="close_friend">💛 Close Friend</option>
+        <select name="category" id="add-category-select">
+          <option value="friend">👋 Friends</option>
+          <option value="close_friend">💛 Close Friends</option>
           <option value="related">🔗 Related to Friend/Close Friend</option>
-          <option value="archived">📦 Archived (hidden, still tracked)</option>
+          <option value="random" selected>🌐 Random (Found Online)</option>
+          <option value="misc">🗂️ Misc.</option>
+          <option value="archived">📦 Archived</option>
         </select>
       </div>
       <p style="color:var(--muted); font-size:0.82rem; margin-bottom:1.2rem; line-height:1.6;">
