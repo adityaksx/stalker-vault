@@ -92,8 +92,8 @@ function renderHomeView() {
     const extra = count > 3 ? `<div class="preview-extra">+${count - 3}</div>` : '';
 
     return `
-      <div class="cat-card" data-cat="${cat}" onclick="openCategory('${cat}')">
-        <div class="cat-card-top" style="--cat-color:${meta.color}">
+      <div class="cat-card" data-cat="${cat}" style="--cat-color:${meta.color}" onclick="openCategory('${cat}')">
+        <div class="cat-card-top">
           <div class="cat-card-icon">${meta.emoji}</div>
           <div class="cat-card-info">
             <div class="cat-card-name">${meta.label}</div>
