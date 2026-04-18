@@ -620,3 +620,94 @@ async def fetch_and_save_pfp(username: str, save_dir: Path):
     out_path.write_bytes(data)
     print(f"[SAVED] @{username} - {out_path}")
     return str(out_path), pic_url
+
+
+@app.patch("/api/people/{pid}/category")
+async def update_category(pid: int, category: str = Form(...)):
+    p = db.get_person(pid)
+    if not p:
+        raise HTTPException(404, "Not found")
+    db.update_person_field(pid, "category", category)
+    return {"ok": True, "category": category}
+
+
+# ═══════════════════════════════════════════════════════════════
+# Highlights & Feed ZIP import endpoints
+# ═══════════════════════════════════════════════════════════════
+import zipfile, io, re as _re
+
+@app.post("/api/people/{pid}/highlights/import-zip")
+async def import_highlight_zip(pid: int, file: UploadFile = File(...)):
+    if not db.get_person(pid):
+        raise HTTPException(404, "Person not found")
+    content  = await file.read()
+    zip_name = file.filename or "highlight.zip"
+    stem     = zip_name.replace('.zip','').replace('.ZIP','')
+    m        = _re.match(r'^(.+?)_highlights?', stem, _re.IGNORECASE)
+    hl_name  = m.group(1).replace('_',' ').strip().title() if m else stem
+    hl_id    = db.create_highlight(pid, hl_name, zip_name)
+    upload_dir = Path("uploads") / str(pid) / "highlights" / str(hl_id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    count = 0
+    with zipfile.ZipFile(io.BytesIO(content)) as zf:
+        for entry in sorted(zf.namelist()):
+            base = Path(entry).name
+            if not base or base.startswith('.'): continue
+            ext      = Path(base).suffix.lower()
+            is_video = ext in ('.mp4','.mov','.webm','.avi')
+            if not (is_video or ext in ('.jpg','.jpeg','.png','.webp','.heic')): continue
+            dm = _re.search(r'_(\d{2})_(\d{2})_(\d{4})_', base)
+            date_str = f"{dm.group(3)}-{dm.group(2)}-{dm.group(1)}" if dm else None
+            dest = upload_dir / base
+            with zf.open(entry) as sf, open(dest,'wb') as df: df.write(sf.read())
+            db.add_highlight_story(hl_id, base, f"/uploads/{pid}/highlights/{hl_id}/{base}", is_video, date_str)
+            count += 1
+    return {"ok": True, "name": hl_name, "story_count": count, "id": hl_id}
+
+@app.get("/api/people/{pid}/highlights")
+async def get_highlights(pid: int):
+    return db.get_highlights(pid)
+
+@app.get("/api/highlights/{hl_id}/stories")
+async def get_highlight_stories(hl_id: int):
+    return db.get_highlight_stories(hl_id)
+
+@app.post("/api/people/{pid}/feed-posts/import-zip")
+async def import_feed_zip(pid: int, file: UploadFile = File(...)):
+    if not db.get_person(pid):
+        raise HTTPException(404, "Person not found")
+    content   = await file.read()
+    zip_name  = file.filename or "feed.zip"
+    upload_dir = Path("uploads") / str(pid) / "feed"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    def parse_date(name):
+        m = _re.search(r'_(\d{2})_(\d{2})_(\d{4})_', name)
+        return f"{m.group(3)}-{m.group(2)}-{m.group(1)}" if m else "unknown"
+    groups = {}
+    with zipfile.ZipFile(io.BytesIO(content)) as zf:
+        for entry in sorted(zf.namelist()):
+            base = Path(entry).name
+            if not base or base.startswith('.'): continue
+            ext      = Path(base).suffix.lower()
+            is_video = ext in ('.mp4','.mov','.webm','.avi')
+            if not (is_video or ext in ('.jpg','.jpeg','.png','.webp','.heic')): continue
+            dk = parse_date(base)
+            groups.setdefault(dk,[]).append((entry,base,is_video))
+    post_count = 0
+    with zipfile.ZipFile(io.BytesIO(content)) as zf:
+        for dk, items in sorted(groups.items()):
+            post_id = db.create_feed_post(pid, dk, zip_name)
+            for (entry,base,is_video) in items:
+                dest = upload_dir / base
+                with zf.open(entry) as sf, open(dest,'wb') as df: df.write(sf.read())
+                db.add_feed_post_item(post_id, base, f"/uploads/{pid}/feed/{base}", is_video, dk)
+            post_count += 1
+    return {"ok": True, "post_count": post_count}
+
+@app.get("/api/people/{pid}/feed-posts")
+async def get_feed_posts(pid: int):
+    return db.get_feed_posts(pid)
+
+@app.get("/api/feed-posts/{post_id}/items")
+async def get_feed_post_items(post_id: int):
+    return db.get_feed_post_items(post_id)
