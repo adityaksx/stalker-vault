@@ -540,3 +540,115 @@ hr { border: none; border-top: 1px solid var(--border); margin: 2.5rem 0; }
 @media(max-width:640px){ .ig-diff-controls { grid-template-columns:1fr; } }
 .ig-diff-summary { display:flex;gap:1rem;flex-wrap:wrap;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:0.75rem 1rem;font-size:0.84rem; }
 .ig-ok-badge { background:rgba(74,222,128,0.1);border:1px solid #4ade80;border-radius:8px;padding:0.6rem 1rem;color:#4ade80;font-weight:600;margin-top:0.5rem; }
+
+/* ── Category Colors ── */
+:root {
+  --cat-friend:  #34d399;
+  --cat-close:   #f472b6;
+  --cat-related: #38bdf8;
+  --cat-random:  #a78bfa;
+  --cat-archived:#6b7280;
+}
+
+/* ── Category Filter Bar ── */
+.cat-filter-bar {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.8rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.cat-tab {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--muted2);
+  font-size: 0.8rem; font-weight: 600;
+  padding: 0.4rem 1rem; border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.18s;
+  font-family: inherit;
+}
+.cat-tab:hover { color: var(--text); border-color: var(--accent); }
+.cat-tab[data-cat="all"].active       { background: rgba(167,139,250,0.15); color: var(--accent); border-color: var(--accent); }
+.cat-tab[data-cat="friend"].active    { background: rgba(52,211,153,0.15);  color: var(--cat-friend); border-color: var(--cat-friend); }
+.cat-tab[data-cat="close_friend"].active { background: rgba(244,114,182,0.15); color: var(--cat-close); border-color: var(--cat-close); }
+.cat-tab[data-cat="related"].active   { background: rgba(56,189,248,0.15);  color: var(--cat-related); border-color: var(--cat-related); }
+.cat-tab[data-cat="random"].active    { background: rgba(167,139,250,0.15); color: var(--cat-random); border-color: var(--cat-random); }
+.cat-tab[data-cat="archived"].active  { background: rgba(107,114,128,0.15); color: var(--cat-archived); border-color: var(--cat-archived); }
+
+/* ── Category badge on person card ── */
+.cat-badge {
+  font-size: 0.67rem; font-weight: 700;
+  padding: 0.18rem 0.6rem; border-radius: 20px;
+  border: 1px solid;
+  letter-spacing: 0.02em;
+  align-self: center;
+  white-space: nowrap;
+}
+
+/* ── Card accent top borders per category ── */
+.person-card.cat-friend       { border-top: 2px solid var(--cat-friend); }
+.person-card.cat-close_friend { border-top: 2px solid var(--cat-close); }
+.person-card.cat-related      { border-top: 2px solid var(--cat-related); }
+.person-card.cat-random       { border-top: 2px solid var(--cat-random); }
+.person-card.cat-archived     { border-top: 2px solid var(--cat-archived); opacity: 0.65; }
+
+/* ── Category select in modal ── */
+select option { background: #1a1a24; color: #f0f0f8; }
+
+/* ── Category Colors ── */
+:root {
+  --cat-friend:  #34d399;   /* emerald green */
+  --cat-close:   #f472b6;   /* pink */
+  --cat-related: #38bdf8;   /* sky blue */
+  --cat-random:  #a78bfa;   /* violet */
+  --cat-archived:#6b7280;   /* gray */
+}
+
+/* ── Category Filter Bar ── */
+.cat-filter-bar {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.8rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.cat-tab {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--muted2);
+  font-size: 0.8rem; font-weight: 600;
+  padding: 0.4rem 1rem; border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.18s;
+  font-family: inherit;
+}
+.cat-tab:hover { color: var(--text); border-color: var(--accent); }
+.cat-tab[data-cat="all"].active       { background: rgba(167,139,250,0.15); color: var(--accent); border-color: var(--accent); }
+.cat-tab[data-cat="friend"].active    { background: rgba(52,211,153,0.15);  color: var(--cat-friend); border-color: var(--cat-friend); }
+.cat-tab[data-cat="close_friend"].active { background: rgba(244,114,182,0.15); color: var(--cat-close); border-color: var(--cat-close); }
+.cat-tab[data-cat="related"].active   { background: rgba(56,189,248,0.15);  color: var(--cat-related); border-color: var(--cat-related); }
+.cat-tab[data-cat="random"].active    { background: rgba(167,139,250,0.15); color: var(--cat-random); border-color: var(--cat-random); }
+.cat-tab[data-cat="archived"].active  { background: rgba(107,114,128,0.15); color: var(--cat-archived); border-color: var(--cat-archived); }
+
+/* ── Category badge on person card ── */
+.cat-badge {
+  font-size: 0.67rem; font-weight: 700;
+  padding: 0.18rem 0.6rem; border-radius: 20px;
+  border: 1px solid;
+  letter-spacing: 0.02em;
+  align-self: center;
+  white-space: nowrap;
+}
+
+/* ── Card accent borders per category ── */
+.person-card.cat-friend       { border-top: 2px solid var(--cat-friend); }
+.person-card.cat-close_friend { border-top: 2px solid var(--cat-close); }
+.person-card.cat-related      { border-top: 2px solid var(--cat-related); }
+.person-card.cat-random       { border-top: 2px solid var(--cat-random); }
+.person-card.cat-archived     { border-top: 2px solid var(--cat-archived); opacity: 0.65; }
+
+/* ── Category select in modal ── */
+select option { background: #1a1a24; color: #f0f0f8; }
