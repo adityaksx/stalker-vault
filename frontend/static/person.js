@@ -84,7 +84,7 @@ async function loadPerson() {
   render();
 }
 
-function render() { renderHero(); renderFields(); renderMedia(); }
+function render() { renderHero(); renderFields(); renderMedia(); updateCatBadge(personData?.category); }
 
 function renderHero() {
   const d   = personData;
@@ -106,8 +106,14 @@ function renderHero() {
         <h1>${esc(d.name)}</h1>
         ${handle}
         <div class="tags">${tags}</div>
+        <div class="cat-badge-wrap" style="margin-bottom:0.5rem;">
+          <span id="person-cat-badge" class="cat-badge" style="cursor:pointer;font-size:0.8rem;padding:0.25rem 0.7rem;" onclick="openCatModal()" title="Click to change category">
+            Loading...
+          </span>
+        </div>
         <div class="hero-actions">
           <button class="btn btn-secondary btn-sm" onclick="editName()">✏️ Rename</button>
+          <button class="btn btn-secondary btn-sm" onclick="openCatModal()">🏷 Category</button>
           <button class="btn btn-danger btn-sm" onclick="confirmDelete()">🗑 Delete</button>
         </div>
         <div class="added-date">Added ${fmtDt(d.added_at)}</div>
@@ -623,3 +629,56 @@ async function init() {
 }
 
 init();
+// ── Category ──────────────────────────────────────────────────────────────────
+const CAT_LABELS = {
+  friend:'👋 Friends', close_friend:'💛 Close Friends',
+  related:'🔗 Related to Friend/Close Friend',
+  random:'🌐 Random (Found Online)', misc:'🗂️ Misc.', archived:'📦 Archived',
+};
+const CAT_COLORS = {
+  friend:'#a78bfa', close_friend:'#fbbf24', related:'#38bdf8',
+  random:'#34d399', misc:'#f472b6', archived:'#5a5a7a',
+};
+
+function updateCatBadge(cat) {
+  const badge = document.getElementById('person-cat-badge');
+  if (!badge) return;
+  const c = cat || 'random';
+  badge.textContent = CAT_LABELS[c] || c;
+  badge.style.background = (CAT_COLORS[c] || '#888') + '22';
+  badge.style.color = CAT_COLORS[c] || '#888';
+  badge.style.borderColor = (CAT_COLORS[c] || '#888') + '44';
+  badge.dataset.cat = c;
+}
+
+function openCatModal() {
+  const current = personData?.category || 'random';
+  const sel = document.getElementById('cat-select');
+  if (sel) sel.value = current;
+  document.getElementById('cat-modal')?.classList.add('open');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const catModalClose = document.getElementById('cat-modal-close');
+  const catModal      = document.getElementById('cat-modal');
+  const catForm       = document.getElementById('cat-form');
+
+  if (catModalClose) catModalClose.addEventListener('click', () => catModal?.classList.remove('open'));
+  if (catModal) catModal.addEventListener('click', e => { if (e.target === catModal) catModal.classList.remove('open'); });
+
+  if (catForm) catForm.addEventListener('submit', async e => {
+    e.preventDefault();
+    const newCat = document.getElementById('cat-select').value;
+    const fd = new FormData();
+    fd.append('category', newCat);
+    try {
+      const r = await fetch(`/api/people/${pid}/category`, { method: 'PATCH', body: fd });
+      if ((await r.json()).ok) {
+        personData.category = newCat;
+        updateCatBadge(newCat);
+        catModal.classList.remove('open');
+        showToast && showToast('Category updated ✓');
+      }
+    } catch { alert('Failed to update category'); }
+  });
+});
