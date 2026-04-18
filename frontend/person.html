@@ -23,6 +23,39 @@
   <div id="fields-section"></div>
   <hr/>
   <div id="media-section"></div>
+  <div id="highlights-section"></div>
+  <div id="feed-section"></div>
+
+  <!-- Import ZIPs -->
+  <div class="info-section">
+    <h2>📥 Import from ZIP</h2>
+    <div class="import-grid">
+      <div class="import-card">
+        <div class="import-icon">🎬</div>
+        <div class="import-title">Instagram Highlights ZIP</div>
+        <div class="import-desc">Export your Highlights as a ZIP. Stories are grouped automatically by highlight name.</div>
+        <form id="hl-import-form" enctype="multipart/form-data">
+          <label class="file-upload-label">
+            <input type="file" name="file" accept=".zip" required style="display:none" onchange="submitHighlightZip(this)">
+            <span class="btn btn-secondary btn-sm" onclick="this.previousElementSibling.click()">📂 Choose ZIP</span>
+          </label>
+        </form>
+        <div id="hl-import-status" style="font-size:.8rem;color:var(--muted2);margin-top:.4rem"></div>
+      </div>
+      <div class="import-card">
+        <div class="import-icon">📸</div>
+        <div class="import-title">Instagram Feed / Reels ZIP</div>
+        <div class="import-desc">Export posts &amp; reels as a ZIP. Photos/videos are grouped by date into posts.</div>
+        <form id="feed-import-form" enctype="multipart/form-data">
+          <label class="file-upload-label">
+            <input type="file" name="file" accept=".zip" required style="display:none" onchange="submitFeedZip(this)">
+            <span class="btn btn-secondary btn-sm" onclick="this.previousElementSibling.click()">📂 Choose ZIP</span>
+          </label>
+        </form>
+        <div id="feed-import-status" style="font-size:.8rem;color:var(--muted2);margin-top:.4rem"></div>
+      </div>
+    </div>
+  </div>
   <hr/>
   <div id="ig-section"></div>
   <hr/>
@@ -205,5 +238,86 @@
 </div>
 
 <script src="/static/person.js"></script>
+
+<!-- Category Modal -->
+<div class="modal-overlay" id="cat-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="cat-modal-title">
+    <h2 id="cat-modal-title">🏷 Change Category</h2>
+    <form id="cat-form">
+      <div class="form-group">
+        <label>Category</label>
+        <select id="cat-select" name="category">
+          <option value="friend">👋 Friends</option>
+          <option value="close_friend">💛 Close Friends</option>
+          <option value="related">🔗 Related to Friend/Close Friend</option>
+          <option value="random">🌐 Random (Found Online)</option>
+          <option value="misc">🗂️ Misc.</option>
+          <option value="archived">📦 Archived</option>
+        </select>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" id="cat-modal-close">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save →</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Highlights Stories Modal -->
+<div class="modal-overlay" id="hl-modal">
+  <div class="modal modal-wide" role="dialog" aria-modal="true">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <h2>🎬 Highlight Stories</h2>
+      <button class="btn btn-secondary btn-sm" onclick="document.getElementById('hl-modal').classList.remove('open')">✕ Close</button>
+    </div>
+    <div id="hl-modal-body" style="max-height:70vh;overflow-y:auto"></div>
+  </div>
+</div>
+
+<!-- Feed Post Modal -->
+<div class="modal-overlay" id="feed-modal">
+  <div class="modal modal-wide" role="dialog" aria-modal="true">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <h2>📸 Post Items</h2>
+      <button class="btn btn-secondary btn-sm" onclick="document.getElementById('feed-modal').classList.remove('open')">✕ Close</button>
+    </div>
+    <div id="feed-modal-body" style="max-height:70vh;overflow-y:auto"></div>
+  </div>
+</div>
+
+<script>
+// ZIP import helpers
+const pid = window.location.pathname.split('/').pop();
+const API = '';
+
+async function submitHighlightZip(input) {
+  const statusEl = document.getElementById('hl-import-status');
+  const file = input.files[0];
+  if (!file) return;
+  statusEl.textContent = '⏳ Uploading…';
+  const fd = new FormData(); fd.append('file', file);
+  try {
+    const r = await fetch(`${API}/api/people/${pid}/highlights/import-zip`, {method:'POST', body:fd});
+    const d = await r.json();
+    statusEl.textContent = d.ok ? `✅ Imported "${d.name}" (${d.story_count} stories)` : '❌ Failed';
+    if (d.ok) setTimeout(() => location.reload(), 1200);
+  } catch(e) { statusEl.textContent = '❌ Error: ' + e.message; }
+}
+
+async function submitFeedZip(input) {
+  const statusEl = document.getElementById('feed-import-status');
+  const file = input.files[0];
+  if (!file) return;
+  statusEl.textContent = '⏳ Uploading…';
+  const fd = new FormData(); fd.append('file', file);
+  try {
+    const r = await fetch(`${API}/api/people/${pid}/feed-posts/import-zip`, {method:'POST', body:fd});
+    const d = await r.json();
+    statusEl.textContent = d.ok ? `✅ Imported ${d.post_count} posts` : '❌ Failed';
+    if (d.ok) setTimeout(() => location.reload(), 1200);
+  } catch(e) { statusEl.textContent = '❌ Error: ' + e.message; }
+}
+</script>
+
 </body>
 </html>
