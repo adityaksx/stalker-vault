@@ -4,7 +4,7 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "vault.db"
 
-CATEGORIES = ["friend", "close_friend", "related", "random", "archived"]
+CATEGORIES = ["friend", "close_friend", "related", "random", "misc", "archived"]
 
 def get_connection():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
