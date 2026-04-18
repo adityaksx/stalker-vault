@@ -25,17 +25,17 @@ BASE_DIR     = Path(__file__).parent
 ROOT_DIR     = BASE_DIR.parent
 FRONTEND_DIR = ROOT_DIR / "frontend"
 STORAGE_DIR  = ROOT_DIR / "storage"
-MIN_PFP_SIZE = 250  # reject anything smaller than 300x300
+MIN_PFP_SIZE = 250
 STATE_FILE = Path(__file__).parent / "ig_browser_state.json"
 _executor = ThreadPoolExecutor(max_workers=2)
 
-load_dotenv()   # loads .env file automatically
+load_dotenv()
 
 IG_USER = os.getenv("IG_USERNAME", "")
 IG_PASS = os.getenv("IG_PASSWORD", "")
 
 _il = instaloader.Instaloader(
-    download_pictures=False,   # we handle saving ourselves
+    download_pictures=False,
     quiet=True,
     request_timeout=10,
 )
@@ -49,19 +49,18 @@ async def lifespan(app: FastAPI):
     from database.db import init_db
     init_db()
 
-    # 1. Start Instaloader session
     if IG_USER and IG_PASS:
         try:
             if SESSION_FILE.exists():
                 _il.load_session_from_file(IG_USER, str(SESSION_FILE))
-                print(f"[✓] Instagram session loaded for @{IG_USER}")
+                print(f"[OK] Instagram session loaded for @{IG_USER}")
             else:
                 _il.login(IG_USER, IG_PASS)
                 _il.save_session_to_file(str(SESSION_FILE))
-                print(f"[✓] Instagram logged in + session saved for @{IG_USER}")
+                print(f"[OK] Instagram logged in + session saved for @{IG_USER}")
         except Exception as ex:
             print(f"[!] Instagram login failed: {ex}")
-    yield  # ─── APP IS RUNNING ───
+    yield
 
 
 app = FastAPI(title="Vault", lifespan=lifespan)
@@ -85,7 +84,6 @@ TYPE_FOLDER = {
 }
 
 def safe_folder_name(name: str) -> str:
-    # Remove characters not safe for folder names, collapse spaces
     s = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', name)
     s = re.sub(r'\s+', '_', s.strip())
     return s or "unknown"
@@ -112,14 +110,15 @@ def api_list():
     from database.db import get_all_people
     rows = get_all_people()
     return {"people": [
-        {"id":r[0],"name":r[1],"added_at":r[2],"insta":r[3],"profile_pic":r[4],"tag":r[5]}
+        {"id":r[0],"name":r[1],"added_at":r[2],"insta":r[3],
+         "profile_pic":r[4],"tag":r[5],"category":r[6]}
         for r in rows
     ]}
 
 @app.post("/api/people")
-async def api_create(name: str = Form(...)):
+async def api_create(name: str = Form(...), category: str = Form(default="random")):
     from database.db import create_person
-    pid = create_person(name)
+    pid = create_person(name, category)
     return {"ok": True, "id": pid}
 
 @app.patch("/api/people/{pid}")
@@ -154,10 +153,16 @@ def api_get(pid: int):
     fields = get_fields(pid)
     media  = get_media(pid)
     return {
-        "id": row[0], "name": row[1], "added_at": row[2],
+        "id": row[0], "name": row[1], "added_at": row[2], "category": row[3],
         "fields": [{"id":f[0],"type":f[1],"label":f[2],"value":f[3],"added_at":f[4]} for f in fields],
         "media":  [{"id":m[0],"type":m[1],"filename":m[2],"path":m[3],"local_path":m[6],"caption":m[4],"added_at":m[5]} for m in media]
     }
+
+@app.patch("/api/people/{pid}/category")
+async def api_update_category(pid: int, category: str = Form(...)):
+    from database.db import update_person_category
+    update_person_category(pid, category)
+    return {"ok": True}
 
 # ── Fields ──
 @app.post("/api/people/{pid}/fields")
@@ -198,7 +203,6 @@ async def api_add_media(
     if not file or not file.filename:
         raise HTTPException(400, "No file provided")
 
-    # Get person name for folder
     person_row  = get_person(pid)
     person_name = person_row[1] if person_row else f"person_{pid}"
 
@@ -210,11 +214,10 @@ async def api_add_media(
     dest       = dest_dir / uuid_name
     url        = f"/storage/{safe_name}/{folder_type}/{uuid_name}"
 
-    # Use forward slashes for local_path so it displays cleanly in UI
     local_path = str(dest.resolve()).replace("\\", "/")
 
     with dest.open("wb") as f:
-        shutil.copyfileobj(file.file, f) # noqa
+        shutil.copyfileobj(file.file, f)
 
     mid = add_media(pid, media_type, url,
                     filename=original_name, caption=caption, local_path=local_path)
@@ -223,7 +226,6 @@ async def api_add_media(
 @app.delete("/api/media/{mid}")
 def api_delete_media(mid: int):
     from database.db import get_media_by_id, delete_media
-    # fetch path before deleting
     row = get_media_by_id(mid)
     if row and row["local_path"]:
         try:
@@ -237,12 +239,11 @@ def api_delete_media(mid: int):
 async def api_rename_media(mid: int, filename: str = Form(...)):
     from database.db import rename_media, get_media_by_id
     row = get_media_by_id(mid)
-    if row and row[7]:  # local_path is index 7
+    if row and row[7]:
         old_path = Path(row[7])
         new_path = old_path.parent / filename
         if old_path.exists() and not new_path.exists():
             old_path.rename(new_path)
-            # Update local_path and url path too
             new_url = "/".join(row[3].split("/")[:-1]) + "/" + filename
             from database.db import update_media_path
             update_media_path(mid, new_url, str(new_path).replace("\\", "/"))
@@ -299,32 +300,29 @@ async def api_ig_import(
     consecutive_429s = 0
 
     for i, (uname, fname, csv_pic_url) in enumerate(entries):
-        # Circuit breaker — pause batch for 5 min after 3 consecutive failures
         if consecutive_429s >= 3:
-            print(f"[⚠️ RATE LIMITED] 3 consecutive failures — pausing batch for 5 minutes")
+            print(f"[RATE LIMITED] 3 consecutive failures - pausing for 5 minutes")
             await asyncio.sleep(300)
             consecutive_429s = 0
 
-        # Single delay per user — larger after first 10
         wait = random.uniform(2, 4) if i < 10 else random.uniform(6, 12)
         print(f"[rate-limit] waiting {wait:.1f}s before @{uname} ({i+1}/{len(entries)})")
         await asyncio.sleep(wait)
 
-        # Fetch — local_path and fetched_url are separate from csv_pic_url
         local_path, fetched_url = await fetch_and_save_pfp(uname, pic_dir)
 
         if local_path:
             hd_count += 1
             consecutive_429s = 0
-            save_url = fetched_url  # use the freshly fetched signed URL
+            save_url = fetched_url
         else:
             rejected_count += 1
             consecutive_429s += 1
-            save_url = csv_pic_url  # fall back to original CSV URL
+            save_url = csv_pic_url
 
         add_ig_entry(sid, uname, fname, save_url, local_path)
 
-    print(f"[import] Done — ✅ HD: {hd_count}  ❌ rejected/skipped: {rejected_count}  Total: {len(entries)}")
+    print(f"[import] Done - HD: {hd_count}  rejected: {rejected_count}  Total: {len(entries)}")
     return {"ok": True, "snapshot_id": sid, "count": len(entries)}
 
 @app.get("/api/ig-snapshots/diff")
@@ -360,10 +358,9 @@ def api_ig_delete_snapshot(sid: int):
     return {"ok": True}
 
 
-# ─── Cookie Helper ────────────────────────────────────────────────────────────
+# ─── Cookie Helper ───────────────────────────────────────────────────────────
 
 def _get_browser_cookies() -> dict:
-    """Extract Instagram cookies from saved Playwright browser session."""
     if STATE_FILE.exists():
         try:
             state = json.loads(STATE_FILE.read_text())
@@ -377,21 +374,21 @@ def _get_browser_cookies() -> dict:
     return {}
 
 
-# ─── Image Size Validator ─────────────────────────────────────────────────────
+# ─── Image Size Validator ────────────────────────────────────────────────────
 
 def check_image_size(data: bytes, username: str) -> bool:
     try:
         img = Image.open(io.BytesIO(data))
         w, h = img.size
-        label = "✅ HD" if w >= 300 else "⚠️ LOW-RES"
-        print(f"[{label}] @{username} — {w}x{h}")
-        return w >= 100  # accept everything — 150px is best Instagram gives for some accounts
+        label = "HD" if w >= 300 else "LOW-RES"
+        print(f"[{label}] @{username} - {w}x{h}")
+        return w >= 100
     except Exception as e:
-        print(f"[size-check-error] @{username} — {e}")
+        print(f"[size-check-error] @{username} - {e}")
         return len(data) > 3000
 
 
-# ─── Tier 1: Direct API ───────────────────────────────────────────────────────
+# ─── Tier 1: Direct API ──────────────────────────────────────────────────────
 async def fetch_pfp_api(username: str):
     ig_cookies = _get_browser_cookies()
     if not ig_cookies:
@@ -413,14 +410,12 @@ async def fetch_pfp_api(username: str):
                 f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}",
                 headers=headers, timeout=10.0,
             )
-            print(f"[api-status] @{username} — HTTP {r.status_code}")
+            print(f"[api-status] @{username} - HTTP {r.status_code}")
             if r.status_code != 200:
-                print(f"[api-fail] @{username} — Status: {r.status_code}")
                 return None, None
 
             user = r.json().get("data", {}).get("user", {})
             if not user:
-                print(f"[api-empty] @{username} — no user in response")
                 return None, None
 
             versions = user.get("hd_profile_pic_versions") or []
@@ -434,18 +429,14 @@ async def fetch_pfp_api(username: str):
             )
 
             if not hd_url:
-                print(f"[api-nourl] @{username} — no pic URL in response")
                 return None, None
 
-            print(f"[api-url] @{username} — {hd_url}")
             img = await client.get(hd_url, timeout=15.0, follow_redirects=True)
             if img.status_code == 200 and check_image_size(img.content, username):
                 return img.content, hd_url
-            else:
-                print(f"[api-img-fail] @{username} — img HTTP {img.status_code}")
 
         except Exception as e:
-            print(f"[api-error] @{username} — {e}")
+            print(f"[api-error] @{username} - {e}")
 
     return None, None
 
@@ -456,14 +447,13 @@ async def fetch_pfp_api_with_retry(username: str):
         if data:
             return data, url
         if attempt == 0:
-            # Check if last call was rate-limited — wait longer
-            wait = random.uniform(8, 15)   # was 2-5, now 8-15 for 429 recovery
-            print(f"[api-retry] @{username} — retrying in {wait:.1f}s")
+            wait = random.uniform(8, 15)
+            print(f"[api-retry] @{username} - retrying in {wait:.1f}s")
             await asyncio.sleep(wait)
     return None, None
 
 def _playwright_fetch_sync(username: str):
-    print(f"[debug] STATE_FILE = {STATE_FILE}, exists = {STATE_FILE.exists()}")
+    print(f"[playwright] STATE_FILE = {STATE_FILE}, exists = {STATE_FILE.exists()}")
     captured_url = None
 
     def on_response(response):
@@ -484,9 +474,9 @@ def _playwright_fetch_sync(username: str):
                     or user.get("profile_pic_url")
                 )
                 if captured_url:
-                    print(f"[playwright-intercept] @{username} — captured URL via response listener")
+                    print(f"[playwright-intercept] @{username} - captured URL")
             except Exception as e:
-                print(f"[playwright-intercept-err] @{username} — {e}")
+                print(f"[playwright-intercept-err] @{username} - {e}")
 
     try:
         with sync_playwright() as p:
@@ -504,7 +494,6 @@ def _playwright_fetch_sync(username: str):
                         "Chrome/122.0.0.0 Safari/537.36"
                     ),
                 )
-                print(f"[playwright] Loaded saved browser session from {STATE_FILE.name}")
             else:
                 context = browser.new_context(
                     user_agent=(
@@ -520,12 +509,11 @@ def _playwright_fetch_sync(username: str):
                         for c in _il.context._session.cookies if c.value
                     ]
                     context.add_cookies(ig_cookies)
-                    print(f"[playwright] No state file — injected {len(ig_cookies)} fallback cookies")
                 except Exception as e:
                     print(f"[playwright-cookie-warn] {e}")
 
             page = context.new_page()
-            page.on("response", on_response)  # must be before goto
+            page.on("response", on_response)
 
             try:
                 page.goto(
@@ -534,19 +522,14 @@ def _playwright_fetch_sync(username: str):
                     timeout=15000,
                 )
 
-                # Check for login wall or unavailable page
                 content = page.content()
                 if "This Account is Private" in content or "Sorry, this page" in content:
-                    print(f"[playwright-private] @{username} — private/unavailable")
+                    print(f"[playwright-private] @{username} - private/unavailable")
                     return None, None
 
-                # Give background XHRs time to fire and be intercepted
                 page.wait_for_timeout(3000)
 
-                # Tier 2b: page.evaluate — call API directly from inside browser
-                # Uses browser's own cookies via credentials:include, bypasses external 429
                 if not captured_url:
-                    print(f"[playwright-evaluate] @{username} — calling API from browser context")
                     try:
                         result = page.evaluate(f"""
                             async () => {{
@@ -573,7 +556,6 @@ def _playwright_fetch_sync(username: str):
                                 }};
                             }}
                         """)
-                        print(f"[playwright-evaluate-result] @{username} — {result}")
                         if result and not result.get("error"):
                             captured_url = (
                                 result.get("hd_info")
@@ -581,20 +563,12 @@ def _playwright_fetch_sync(username: str):
                                 or result.get("hd")
                                 or result.get("sd")
                             )
-                        elif result and result.get("error"):
-                            print(f"[playwright-evaluate-fail] @{username} — API returned HTTP {result['error']}")
                     except Exception as e:
-                        print(f"[playwright-evaluate-err] @{username} — {e}")
+                        print(f"[playwright-evaluate-err] @{username} - {e}")
 
-                # All methods exhausted
                 if not captured_url:
-                    page.screenshot(path=f"debug_{username}.png")
-                    print(f"[playwright-fail] @{username} — all methods exhausted, screenshot saved")
                     return None, None
 
-                print(f"[playwright-url] @{username} — {captured_url}")
-
-                # Download image inside same authenticated context
                 img_page = context.new_page()
                 try:
                     img_resp = img_page.goto(
@@ -604,50 +578,45 @@ def _playwright_fetch_sync(username: str):
                         data = img_resp.body()
                         if check_image_size(data, username):
                             return data, captured_url
-                    else:
-                        status = img_resp.status if img_resp else "no response"
-                        print(f"[playwright-img-fail] @{username} — HTTP {status}")
                 except Exception as e:
-                    print(f"[playwright-img-error] @{username} — {e}")
+                    print(f"[playwright-img-error] @{username} - {e}")
                 finally:
                     img_page.close()
 
             except Exception as e:
-                print(f"[playwright-fail] @{username} — {e}")
+                print(f"[playwright-fail] @{username} - {e}")
             finally:
                 context.close()
                 browser.close()
 
     except Exception as e:
-        print(f"[playwright-crash] @{username} — {e}")
+        print(f"[playwright-crash] @{username} - {e}")
         traceback.print_exc()
 
     return None, None
 
 
 async def fetch_and_save_pfp(username: str, save_dir: Path):
-    # Tier 1: API
     data, pic_url = await fetch_pfp_api_with_retry(username)
 
-    # Tier 2: Playwright
     if not data:
-        print(f"[fallback] @{username} — API failed, trying Playwright thread...")
+        print(f"[fallback] @{username} - API failed, trying Playwright...")
         try:
             loop = asyncio.get_event_loop()
             data, pic_url = await loop.run_in_executor(_executor, _playwright_fetch_sync, username)
             if data:
-                print(f"[✅ SUCCESS] @{username} — Fetched via Playwright")
+                print(f"[SUCCESS] @{username} - Fetched via Playwright")
         except Exception as e:
-            print(f"[playwright-thread-crash] @{username} — {e}")
+            print(f"[playwright-thread-crash] @{username} - {e}")
             traceback.print_exc()
 
     if not data:
-        print(f"[❌ NO HD] @{username} — All tiers failed")
+        print(f"[NO HD] @{username} - All tiers failed")
         return None, None
 
     save_dir.mkdir(parents=True, exist_ok=True)
     safe_name = username.replace(".", "_").replace("/", "_")
     out_path = save_dir / f"{safe_name}.jpg"
     out_path.write_bytes(data)
-    print(f"[✅ SAVED] @{username} — {out_path}")
+    print(f"[SAVED] @{username} - {out_path}")
     return str(out_path), pic_url
