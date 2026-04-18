@@ -154,110 +154,261 @@ function renderFields() {
 }
 
 function renderMedia() {
-  const media  = personData.media || [];
+  const media = personData.media || [];
   if (!media.length) {
     document.getElementById('media-section').innerHTML =
       `<div class="section-empty">No media added yet.</div>`;
+    renderHighlights();
+    renderFeedPosts();
     return;
   }
-
   const photos = media.filter(m => ['photo','screenshot','profile_pic'].includes(m.type));
   const videos = media.filter(m => m.type === 'video');
   const audios = media.filter(m => m.type === 'audio');
   const files  = media.filter(m => !['photo','screenshot','profile_pic','video','audio'].includes(m.type));
-
   let html = '';
 
   if (photos.length) {
-    html += `<div class="info-section"><h2>Photos &amp; Screenshots (${photos.length})</h2>
-      <div class="screenshots-grid">
-        ${photos.map(m => `
-          <div class="media-item">
-            <img class="screenshot-thumb" src="${m.path}"
-              onclick="openLightbox('${m.path}', '${esc(m.filename||'')}', '${esc(m.local_path||'')}')"
-              onerror="this.style.opacity='0.15'">
-            <div class="media-caption">
-              <span class="fname-badge" title="${esc(m.filename||'')}">${esc(m.filename||'')}</span>
-            </div>
-            <div class="media-meta">
-              <span class="field-time">⏱ ${fmtDt(m.added_at)}</span>
-              <span style="display:flex;gap:0.3rem;align-items:center">
-                <button class="rename-media-btn" onclick="renameMedia(${m.id},'${esc(m.filename||'')}')" title="Rename">✏️</button>
-                <button class="field-del" onclick="deleteMedia(${m.id})">✕</button>
-              </span>
-            </div>
-          </div>`).join('')}
-      </div></div>`;
+    const preview = photos.slice(0,5), rest = photos.slice(5);
+    html += `<div class="info-section" id="photos-section">
+      <div class="media-section-header">
+        <h2>📷 Photos &amp; Screenshots (${photos.length})</h2>
+        ${photos.length>5?`<button class="btn btn-secondary btn-sm" onclick="toggleBlur('photos-section',this)">👁 Show All</button>`:''}
+      </div>
+      <div class="screenshots-grid blurred-group" id="photos-grid" data-expanded="0">
+        ${preview.map(m=>mediaThumbHTML(m,true)).join('')}
+      </div>
+      ${rest.length?`<div class="screenshots-grid" id="photos-rest" style="display:none;margin-top:.75rem">${rest.map(m=>mediaThumbHTML(m,false)).join('')}</div>`:''}
+    </div>`;
   }
 
   if (videos.length) {
-    html += `<div class="info-section"><h2>Videos (${videos.length})</h2>
-      <div class="screenshots-grid">
-        ${videos.map(m => `
-          <div class="media-item">
-            <video controls class="screenshot-thumb" style="aspect-ratio:9/16;background:#000;">
-              <source src="${m.path}">
-            </video>
-            <div class="media-caption">
-              <span class="fname-badge">${esc(m.filename||'')}</span>
-            </div>
-            <div class="media-meta">
-              <span class="field-time">⏱ ${fmtDt(m.added_at)}</span>
-              <span style="display:flex;gap:0.3rem;align-items:center">
-                <button class="rename-media-btn" onclick="renameMedia(${m.id},'${esc(m.filename||'')}')" title="Rename">✏️</button>
-                <button class="field-del" onclick="deleteMedia(${m.id})">✕</button>
-              </span>
-            </div>
-          </div>`).join('')}
-      </div></div>`;
+    const preview = videos.slice(0,5), rest = videos.slice(5);
+    html += `<div class="info-section" id="videos-section">
+      <div class="media-section-header">
+        <h2>🎬 Videos (${videos.length})</h2>
+        ${videos.length>5?`<button class="btn btn-secondary btn-sm" onclick="toggleBlur('videos-section',this)">👁 Show All</button>`:''}
+      </div>
+      <div class="screenshots-grid blurred-group" id="videos-grid" data-expanded="0">
+        ${preview.map(m=>videoThumbHTML(m,true)).join('')}
+      </div>
+      ${rest.length?`<div class="screenshots-grid" id="videos-rest" style="display:none;margin-top:.75rem">${rest.map(m=>videoThumbHTML(m,false)).join('')}</div>`:''}
+    </div>`;
   }
 
   if (audios.length) {
-    html += `<div class="info-section"><h2>Audio / Music (${audios.length})</h2>
-      <div class="fields-grid">
-        ${audios.map(m => `
-          <div class="field-card">
-            <div class="field-label">🎵 Audio</div>
-            <audio controls style="width:100%;margin:0.4rem 0;">
-              <source src="${m.path}">
-            </audio>
-            <div class="field-value" style="font-size:0.8rem">
-              <span class="fname-badge">${esc(m.filename||'')}</span>
-              ${m.caption ? `<div style="color:var(--muted2);margin-top:0.3rem">${esc(m.caption)}</div>` : ''}
-            </div>
-            <div class="field-meta">
-              <span class="field-time">⏱ ${fmtDt(m.added_at)}</span>
-              <span style="display:flex;gap:0.3rem;align-items:center">
-                <button class="rename-media-btn" onclick="renameMedia(${m.id},'${esc(m.filename||'')}')" title="Rename">✏️</button>
-                <button class="field-del" onclick="deleteMedia(${m.id})">✕</button>
-              </span>
-            </div>
-          </div>`).join('')}
-      </div></div>`;
+    html += `<div class="info-section"><h2>🎵 Audio (${audios.length})</h2><div class="fields-grid">
+      ${audios.map(m=>`<div class="field-card">
+        <div class="field-label">🎵 Audio</div>
+        <audio controls style="width:100%;margin:.4rem 0"><source src="${m.path}"></audio>
+        <div class="field-value" style="font-size:.8rem"><span class="fname-badge">${esc(m.filename||'')}</span></div>
+        <div class="field-meta">
+          <span class="field-time">⏱ ${fmtDt(m.added_at)}</span>
+          <span style="display:flex;gap:.3rem">
+            <button class="rename-media-btn" onclick="renameMedia(${m.id},'${esc(m.filename||'')}')">✏️</button>
+            <button class="field-del" onclick="deleteMedia(${m.id})">✕</button>
+          </span>
+        </div></div>`).join('')}
+    </div></div>`;
   }
 
   if (files.length) {
-    html += `<div class="info-section"><h2>Files &amp; Repos (${files.length})</h2>
-      <div class="fields-grid">
-        ${files.map(m => `
-          <div class="field-card">
-            <div class="field-label">${MEDIA_LABELS[m.type]||m.type}</div>
-            <div class="field-value">
-              ${m.type === 'repo_url'
-                ? `<a href="${esc(m.path)}" target="_blank">🐙 ${esc(m.path)} ↗</a>`
-                : `<a href="${esc(m.path)}" download="${esc(m.filename||'file')}">⬇ ${esc(m.filename||'Download')}</a>`}
-              ${m.caption ? `<div style="color:var(--muted2);font-size:0.8rem;margin-top:0.25rem">${esc(m.caption)}</div>` : ''}
-            </div>
-            <div class="field-meta">
-              <span class="field-time">⏱ ${fmtDt(m.added_at)}</span>
-              <button class="field-del" onclick="deleteMedia(${m.id})">✕</button>
-            </div>
-          </div>`).join('')}
-      </div></div>`;
+    html += `<div class="info-section"><h2>📁 Files &amp; Repos (${files.length})</h2><div class="fields-grid">
+      ${files.map(m=>`<div class="field-card">
+        <div class="field-label">${MEDIA_LABELS[m.type]||m.type}</div>
+        <div class="field-value">
+          ${m.type==='repo_url'?`<a href="${esc(m.path)}" target="_blank">🐙 ${esc(m.path)} ↗</a>`
+            :`<a href="${esc(m.path)}" download="${esc(m.filename||'file')}">⬇ ${esc(m.filename||'Download')}</a>`}
+          ${m.caption?`<div style="color:var(--muted2);font-size:.8rem;margin-top:.25rem">${esc(m.caption)}</div>`:''}
+        </div>
+        <div class="field-meta">
+          <span class="field-time">⏱ ${fmtDt(m.added_at)}</span>
+          <button class="field-del" onclick="deleteMedia(${m.id})">✕</button>
+        </div></div>`).join('')}
+    </div></div>`;
   }
 
   document.getElementById('media-section').innerHTML = html;
+  renderHighlights();
+  renderFeedPosts();
 }
+
+function mediaThumbHTML(m, blurred) {
+  return `<div class="media-item${blurred?' media-blurred':''}">
+    <img class="screenshot-thumb" src="${m.path}"
+      onclick="${blurred?'unblurItem(this);':''} openLightbox('${m.path}','${esc(m.filename||'')}','${esc(m.local_path||'')}')"
+      onerror="this.style.opacity='0.15'" loading="lazy">
+    <div class="media-caption"><span class="fname-badge" title="${esc(m.filename||'')}">${esc(m.filename||'')}</span></div>
+    <div class="media-meta">
+      <span class="field-time">⏱ ${fmtDt(m.added_at)}</span>
+      <span style="display:flex;gap:.3rem;align-items:center">
+        <button class="rename-media-btn" onclick="renameMedia(${m.id},'${esc(m.filename||'')}')">✏️</button>
+        <button class="field-del" onclick="deleteMedia(${m.id})">✕</button>
+      </span>
+    </div>
+  </div>`;
+}
+
+function videoThumbHTML(m, blurred) {
+  return `<div class="media-item${blurred?' media-blurred':''}">
+    <video controls class="screenshot-thumb" style="aspect-ratio:9/16;background:#000">
+      <source src="${m.path}">
+    </video>
+    <div class="media-caption"><span class="fname-badge">${esc(m.filename||'')}</span></div>
+    <div class="media-meta">
+      <span class="field-time">⏱ ${fmtDt(m.added_at)}</span>
+      <span style="display:flex;gap:.3rem;align-items:center">
+        <button class="rename-media-btn" onclick="renameMedia(${m.id},'${esc(m.filename||'')}')">✏️</button>
+        <button class="field-del" onclick="deleteMedia(${m.id})">✕</button>
+      </span>
+    </div>
+  </div>`;
+}
+
+function toggleBlur(sectionId, btn) {
+  const section = document.getElementById(sectionId);
+  const grid = section.querySelector('.blurred-group');
+  const rest = section.querySelector('[id$="-rest"]');
+  if (grid.dataset.expanded === '1') {
+    grid.querySelectorAll('.media-item').forEach(el => el.classList.add('media-blurred'));
+    grid.dataset.expanded = '0';
+    if (rest) rest.style.display = 'none';
+    btn.textContent = '👁 Show All';
+  } else {
+    grid.querySelectorAll('.media-blurred').forEach(el => el.classList.remove('media-blurred'));
+    grid.dataset.expanded = '1';
+    if (rest) rest.style.display = 'grid';
+    btn.textContent = '🙈 Collapse';
+  }
+}
+
+function unblurItem(imgEl) {
+  imgEl.closest('.media-item')?.classList.remove('media-blurred');
+}
+
+// ── Highlights ──────────────────────────────────────────────────────────────
+async function renderHighlights() {
+  const sec = document.getElementById('highlights-section');
+  if (!sec) return;
+  let data = [];
+  try { data = await (await fetch(`${API}/api/people/${pid}/highlights`)).json(); } catch {}
+  if (!data.length) { sec.innerHTML = ''; return; }
+  sec.innerHTML = `<div class="info-section">
+    <h2>🎬 Instagram Highlights (${data.length})</h2>
+    <div class="ig-highlights-row">
+      ${data.map(h=>`
+        <div class="ig-highlight-bubble" onclick="openHighlight(${h.id})">
+          <div class="ig-hl-ring">
+            <div class="ig-hl-thumb">
+              ${h.thumb?`<img src="${h.thumb}" loading="lazy" style="width:100%;height:100%;object-fit:cover">`:`<span style="font-size:1.8rem">📽️</span>`}
+            </div>
+          </div>
+          <div class="ig-hl-name">${esc(h.name)}</div>
+          <div class="ig-hl-count">${h.story_count} stories</div>
+        </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+async function openHighlight(hlId) {
+  const stories = await (await fetch(`${API}/api/highlights/${hlId}/stories`)).json();
+  document.getElementById('hl-modal-body').innerHTML = `<div class="hl-stories-grid">
+    ${stories.map(s=>s.is_video
+      ?`<div class="hl-story-item"><video controls class="hl-story-media"><source src="${s.path}"></video><div class="hl-story-date">${s.story_date||fmtDt(s.added_at)}</div></div>`
+      :`<div class="hl-story-item"><img class="hl-story-media" src="${s.path}" onclick="openLightbox('${s.path}','','')"><div class="hl-story-date">${s.story_date||fmtDt(s.added_at)}</div></div>`
+    ).join('')}
+  </div>`;
+  document.getElementById('hl-modal').classList.add('open');
+}
+
+// ── Feed Posts ────────────────────────────────────────────────────────────────
+async function renderFeedPosts() {
+  const sec = document.getElementById('feed-section');
+  if (!sec) return;
+  let posts = [];
+  try { posts = await (await fetch(`${API}/api/people/${pid}/feed-posts`)).json(); } catch {}
+  if (!posts.length) { sec.innerHTML = ''; return; }
+  sec.innerHTML = `<div class="info-section">
+    <h2>📸 Instagram Posts / Reels (${posts.length})</h2>
+    <div class="feed-posts-grid">
+      ${posts.map(p=>{
+        const cover=p.items?.[0], isVid=cover?.is_video;
+        return `<div class="feed-post-card" onclick="openFeedPost(${p.id})">
+          <div class="feed-post-thumb">
+            ${isVid
+              ?`<video class="feed-thumb-media" muted preload="none"><source src="${cover.path}"></video><span class="feed-type-badge">▶</span>`
+              :`<img class="feed-thumb-media" src="${cover?.path||''}" loading="lazy">`}
+            ${p.items.length>1?`<span class="feed-multi-badge">⊞ ${p.items.length}</span>`:''}
+          </div>
+          <div class="feed-post-date">${p.post_date||''}</div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
+}
+
+async function openFeedPost(postId) {
+  const items = await (await fetch(`${API}/api/feed-posts/${postId}/items`)).json();
+  document.getElementById('feed-modal-body').innerHTML = `<div class="hl-stories-grid">
+    ${items.map(item=>item.is_video
+      ?`<div class="hl-story-item"><video controls class="hl-story-media"><source src="${item.path}"></video><div class="hl-story-date">${esc(item.filename||'')}</div></div>`
+      :`<div class="hl-story-item"><img class="hl-story-media" src="${item.path}" onclick="openLightbox('${item.path}','','')"><div class="hl-story-date">${esc(item.filename||'')}</div></div>`
+    ).join('')}
+  </div>`;
+  document.getElementById('feed-modal').classList.add('open');
+}
+
+// ── Category ──────────────────────────────────────────────────────────────────
+const CAT_LABELS = {
+  friend:'👋 Friends', close_friend:'💛 Close Friends',
+  related:'🔗 Related to Friend/Close Friend',
+  random:'🌐 Random (Found Online)', misc:'🗂️ Misc.', archived:'📦 Archived',
+};
+const CAT_COLORS = {
+  friend:'#a78bfa', close_friend:'#fbbf24', related:'#38bdf8',
+  random:'#34d399', misc:'#f472b6', archived:'#5a5a7a',
+};
+
+function updateCatBadge(cat) {
+  const badge = document.getElementById('person-cat-badge');
+  if (!badge) return;
+  const c = cat||'random';
+  badge.textContent  = CAT_LABELS[c]||c;
+  badge.style.background  = (CAT_COLORS[c]||'#888')+'22';
+  badge.style.color       = CAT_COLORS[c]||'#888';
+  badge.style.borderColor = (CAT_COLORS[c]||'#888')+'66';
+}
+
+function openCatModal() {
+  const sel = document.getElementById('cat-select');
+  if (sel) sel.value = personData?.category||'random';
+  document.getElementById('cat-modal')?.classList.add('open');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  ['cat-modal','hl-modal','feed-modal'].forEach(id => {
+    document.getElementById(id)?.addEventListener('click', e => {
+      if (e.target.id === id) document.getElementById(id).classList.remove('open');
+    });
+  });
+  document.getElementById('cat-modal-close')?.addEventListener('click',
+    () => document.getElementById('cat-modal')?.classList.remove('open'));
+
+  document.getElementById('cat-form')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const newCat = document.getElementById('cat-select').value;
+    const fd = new FormData(); fd.append('category', newCat);
+    const r = await fetch(`${API}/api/people/${pid}/category`,{method:'PATCH',body:fd});
+    const d = await r.json();
+    if (d.ok) {
+      personData.category = newCat;
+      updateCatBadge(newCat);
+      document.getElementById('cat-modal').classList.remove('open');
+      showToast('Category updated ✓');
+    }
+  });
+});
+
 
 // ── Add Field ──
 document.getElementById('add-field-form').addEventListener('submit', async e => {
