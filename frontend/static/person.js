@@ -1,42 +1,62 @@
 const API = '';
-const pid = location.pathname.split('/').pop();
+const pid = location.pathname.replace(/\/$/, '').split('/').pop();
+
+function esc(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+function safeUrl(url) {
+  try {
+    const u = new URL(url, window.location.origin);
+    return u.href;
+  } catch {
+    return '#';
+  }
+}
+function safeAttr(s) {
+  return esc(s).replace(/`/g, '&#96;');
+}
 
 const FIELD_TYPES = {
-  instagram:   { label: '📸 Instagram',      group: 'Social',    fmt: v => `<a href="https://instagram.com/${v}" target="_blank">@${v} ↗</a>` },
-  snapchat:    { label: '👻 Snapchat',        group: 'Social',    fmt: v => v },
-  twitter:     { label: '𝕏 X / Twitter',     group: 'Social',    fmt: v => `<a href="https://x.com/${v}" target="_blank">@${v} ↗</a>` },
-  linkedin:    { label: '💼 LinkedIn',        group: 'Social',    fmt: v => `<a href="${v}" target="_blank">View ↗</a>` },
-  pinterest:   { label: '📌 Pinterest',       group: 'Social',    fmt: v => `<a href="https://pinterest.com/${v}" target="_blank">${v} ↗</a>` },
-  facebook:    { label: '📘 Facebook',        group: 'Social',    fmt: v => `<a href="${v}" target="_blank">View ↗</a>` },
-  tiktok:      { label: '🎵 TikTok',          group: 'Social',    fmt: v => `<a href="https://tiktok.com/@${v}" target="_blank">@${v} ↗</a>` },
-  youtube:     { label: '▶️ YouTube',         group: 'Social',    fmt: v => `<a href="${v}" target="_blank">Channel ↗</a>` },
-  telegram:    { label: '✈️ Telegram',        group: 'Social',    fmt: v => v },
-  discord:     { label: '🎮 Discord',         group: 'Social',    fmt: v => v },
-  reddit:      { label: '🤖 Reddit',          group: 'Social',    fmt: v => `<a href="https://reddit.com/u/${v}" target="_blank">u/${v} ↗</a>` },
-  threads:     { label: '🧵 Threads',         group: 'Social',    fmt: v => `<a href="https://threads.net/@${v}" target="_blank">@${v} ↗</a>` },
-  bereal:      { label: '📷 BeReal',          group: 'Social',    fmt: v => v },
-  spotify:     { label: '🎧 Spotify',         group: 'Social',    fmt: v => `<a href="${v}" target="_blank">Profile ↗</a>` },
-  phone:       { label: '📞 Phone',           group: 'Contact',   fmt: v => `<a href="tel:${v}">${v}</a>` },
-  email:       { label: '📧 Email',           group: 'Contact',   fmt: v => `<a href="mailto:${v}">${v}</a>` },
-  whatsapp:    { label: '💬 WhatsApp',        group: 'Contact',   fmt: v => v },
-  nickname:    { label: '🏷 Nickname',        group: 'Identity',  fmt: v => v },
-  dob:         { label: '🎂 Date of Birth',   group: 'Identity',  fmt: v => v },
-  gender:      { label: '⚧ Gender',          group: 'Identity',  fmt: v => v },
-  school:      { label: '🏫 School',          group: 'Education', fmt: v => v },
-  college:     { label: '🎓 College',         group: 'Education', fmt: v => v },
-  workplace:   { label: '🏢 Workplace',       group: 'Work',      fmt: v => v },
-  jobtitle:    { label: '💼 Job Title',       group: 'Work',      fmt: v => v },
-  github:      { label: '🐙 GitHub',          group: 'Work',      fmt: v => `<a href="https://github.com/${v}" target="_blank">${v} ↗</a>` },
-  website:     { label: '🌐 Website',         group: 'Web',       fmt: v => `<a href="${v}" target="_blank">${v} ↗</a>` },
-  location:    { label: '📍 Location',        group: 'Location',  fmt: v => v },
-  address:     { label: '🏠 Address',         group: 'Location',  fmt: v => v },
-  fav_song:    { label: '🎵 Fav Song',        group: 'Music',     fmt: v => v },
-  fav_artist:  { label: '🎤 Fav Artist',      group: 'Music',     fmt: v => v },
-  fav_album:   { label: '💿 Fav Album',       group: 'Music',     fmt: v => v },
-  music_taste: { label: '🎼 Music Taste',     group: 'Music',     fmt: v => v },
-  note:        { label: '📝 Note',            group: 'Notes',     fmt: v => v },
-  tag:         { label: '🔖 Tag',             group: 'Tags',      fmt: v => `<span class="tag">${v}</span>` },
-  custom:      { label: '✏️ Custom',          group: 'Custom',    fmt: v => v },
+  instagram:   { label: '📸 Instagram',      group: 'Social',    fmt: v => `<a href="https://instagram.com/${encodeURIComponent(v)}" target="_blank" rel="noopener noreferrer">@${esc(v)} ↗</a>` },
+  snapchat:    { label: '👻 Snapchat',        group: 'Social',    fmt: v => esc(v) },
+  twitter:     { label: '𝕏 X / Twitter',     group: 'Social',    fmt: v => `<a href="https://x.com/${encodeURIComponent(v)}" target="_blank" rel="noopener noreferrer">@${esc(v)} ↗</a>` },
+  linkedin:    { label: '💼 LinkedIn',        group: 'Social',    fmt: v => `<a href="${safeUrl(v)}" target="_blank" rel="noopener noreferrer">View ↗</a>` },
+  pinterest:   { label: '📌 Pinterest',       group: 'Social',    fmt: v => `<a href="https://pinterest.com/${encodeURIComponent(v)}" target="_blank" rel="noopener noreferrer">${esc(v)} ↗</a>` },
+  facebook:    { label: '📘 Facebook',        group: 'Social',    fmt: v => `<a href="${safeUrl(v)}" target="_blank" rel="noopener noreferrer">View ↗</a>` },
+  tiktok:      { label: '🎵 TikTok',          group: 'Social',    fmt: v => `<a href="https://tiktok.com/@${encodeURIComponent(v)}" target="_blank" rel="noopener noreferrer">@${esc(v)} ↗</a>` },
+  youtube:     { label: '▶️ YouTube',         group: 'Social',    fmt: v => `<a href="${safeUrl(v)}" target="_blank" rel="noopener noreferrer">Channel ↗</a>` },
+  telegram:    { label: '✈️ Telegram',        group: 'Social',    fmt: v => esc(v) },
+  discord:     { label: '🎮 Discord',         group: 'Social',    fmt: v => esc(v) },
+  reddit:      { label: '🤖 Reddit',          group: 'Social',    fmt: v => `<a href="https://reddit.com/u/${encodeURIComponent(v)}" target="_blank" rel="noopener noreferrer">u/${esc(v)} ↗</a>` },
+  threads:     { label: '🧵 Threads',         group: 'Social',    fmt: v => `<a href="https://threads.net/@${encodeURIComponent(v)}" target="_blank" rel="noopener noreferrer">@${esc(v)} ↗</a>` },
+  bereal:      { label: '📷 BeReal',          group: 'Social',    fmt: v => esc(v) },
+  spotify:     { label: '🎧 Spotify',         group: 'Social',    fmt: v => `<a href="${safeUrl(v)}" target="_blank" rel="noopener noreferrer">Profile ↗</a>` },
+  phone:       { label: '📞 Phone',           group: 'Contact',   fmt: v => `<a href="tel:${encodeURIComponent(v)}">${esc(v)}</a>` },
+  email:       { label: '📧 Email',           group: 'Contact',   fmt: v => `<a href="mailto:${encodeURIComponent(v)}">${esc(v)}</a>` },
+  whatsapp:    { label: '💬 WhatsApp',        group: 'Contact',   fmt: v => esc(v) },
+  nickname:    { label: '🏷 Nickname',        group: 'Identity',  fmt: v => esc(v) },
+  dob:         { label: '🎂 Date of Birth',   group: 'Identity',  fmt: v => esc(v) },
+  gender:      { label: '⚧ Gender',          group: 'Identity',  fmt: v => esc(v) },
+  school:      { label: '🏫 School',          group: 'Education', fmt: v => esc(v) },
+  college:     { label: '🎓 College',         group: 'Education', fmt: v => esc(v) },
+  workplace:   { label: '🏢 Workplace',       group: 'Work',      fmt: v => esc(v) },
+  jobtitle:    { label: '💼 Job Title',       group: 'Work',      fmt: v => esc(v) },
+  github:      { label: '🐙 GitHub',          group: 'Work',      fmt: v => `<a href="https://github.com/${encodeURIComponent(v)}" target="_blank" rel="noopener noreferrer">${esc(v)} ↗</a>` },
+  website:     { label: '🌐 Website',         group: 'Web',       fmt: v => `<a href="${safeUrl(v)}" target="_blank" rel="noopener noreferrer">${esc(v)} ↗</a>` },
+  location:    { label: '📍 Location',        group: 'Location',  fmt: v => esc(v) },
+  address:     { label: '🏠 Address',         group: 'Location',  fmt: v => esc(v) },
+  fav_song:    { label: '🎵 Fav Song',        group: 'Music',     fmt: v => esc(v) },
+  fav_artist:  { label: '🎤 Fav Artist',      group: 'Music',     fmt: v => esc(v) },
+  fav_album:   { label: '💿 Fav Album',       group: 'Music',     fmt: v => esc(v) },
+  music_taste: { label: '🎼 Music Taste',     group: 'Music',     fmt: v => esc(v) },
+  note:        { label: '📝 Note',            group: 'Notes',     fmt: v => esc(v) },
+  tag:         { label: '🔖 Tag',             group: 'Tags',      fmt: v => `<span class="tag">${esc(v)}</span>` },
+  custom:      { label: '✏️ Custom',          group: 'Custom',    fmt: v => esc(v) },
 };
 
 const MEDIA_LABELS = {
@@ -53,6 +73,7 @@ const MEDIA_ACCEPT = {
 
 let personData  = null;
 let queuedFiles = [];
+let igSnapshots = [];
 
 function showToast(msg, type = 'success') {
   const t = document.getElementById('toast');
@@ -68,9 +89,6 @@ function fmtDt(iso) {
     });
   } catch { return iso; }
 }
-function esc(s) {
-  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
 
 async function loadPerson() {
   const res = await fetch(`${API}/api/people/${pid}`);
@@ -84,14 +102,19 @@ async function loadPerson() {
   render();
 }
 
-function render() { renderHero(); renderFields(); renderMedia(); updateCatBadge(personData?.category); }
+function render() {
+  renderHero();
+  renderFields();
+  renderMedia();
+  updateCatBadge(personData?.category);
+}
 
 function renderHero() {
   const d   = personData;
   const pic = d.media?.find(m => m.type === 'profile_pic')
            || d.media?.find(m => m.type === 'photo');
   const avatar = pic
-    ? `<img class="person-hero-avatar" src="${pic.path}" alt="${esc(d.name)}">`
+    ? `<img class="person-hero-avatar" src="${safeAttr(pic.path)}" alt="${esc(d.name)}">`
     : `<div class="hero-placeholder">👤</div>`;
 
   const tags   = d.fields?.filter(f => f.type === 'tag')
@@ -130,7 +153,7 @@ function renderFields() {
   }
   const groups = {};
   fields.forEach(f => {
-    const meta = FIELD_TYPES[f.type] || { label: f.type, group: 'Custom', fmt: v => v };
+    const meta = FIELD_TYPES[f.type] || { label: f.type, group: 'Custom', fmt: v => esc(v) };
     if (!groups[meta.group]) groups[meta.group] = [];
     groups[meta.group].push({ ...f, meta });
   });
@@ -138,12 +161,12 @@ function renderFields() {
   document.getElementById('fields-section').innerHTML =
     Object.entries(groups).map(([group, items]) => `
       <div class="info-section">
-        <h2>${group}</h2>
+        <h2>${esc(group)}</h2>
         <div class="fields-grid">
           ${items.map(f => `
             <div class="field-card">
               <div class="field-label">${f.meta.label}${f.label ? ` <span class="field-sublabel">(${esc(f.label)})</span>` : ''}</div>
-              <div class="field-value">${f.meta.fmt(esc(f.value))}</div>
+              <div class="field-value">${f.meta.fmt(f.value)}</div>
               <div class="field-meta">
                 <span class="field-time">⏱ ${fmtDt(f.added_at)}</span>
                 <button class="field-del" onclick="deleteField(${f.id})">✕</button>
@@ -200,12 +223,12 @@ function renderMedia() {
     html += `<div class="info-section"><h2>🎵 Audio (${audios.length})</h2><div class="fields-grid">
       ${audios.map(m=>`<div class="field-card">
         <div class="field-label">🎵 Audio</div>
-        <audio controls style="width:100%;margin:.4rem 0"><source src="${m.path}"></audio>
+        <audio controls style="width:100%;margin:.4rem 0"><source src="${safeAttr(m.path)}"></audio>
         <div class="field-value" style="font-size:.8rem"><span class="fname-badge">${esc(m.filename||'')}</span></div>
         <div class="field-meta">
           <span class="field-time">⏱ ${fmtDt(m.added_at)}</span>
           <span style="display:flex;gap:.3rem">
-            <button class="rename-media-btn" onclick="renameMedia(${m.id},'${esc(m.filename||'')}')">✏️</button>
+            <button class="rename-media-btn" onclick="renameMedia(${m.id}, ${JSON.stringify(m.filename || '')})">✏️</button>
             <button class="field-del" onclick="deleteMedia(${m.id})">✕</button>
           </span>
         </div></div>`).join('')}
@@ -215,10 +238,10 @@ function renderMedia() {
   if (files.length) {
     html += `<div class="info-section"><h2>📁 Files &amp; Repos (${files.length})</h2><div class="fields-grid">
       ${files.map(m=>`<div class="field-card">
-        <div class="field-label">${MEDIA_LABELS[m.type]||m.type}</div>
+        <div class="field-label">${esc(MEDIA_LABELS[m.type]||m.type)}</div>
         <div class="field-value">
-          ${m.type==='repo_url'?`<a href="${esc(m.path)}" target="_blank">🐙 ${esc(m.path)} ↗</a>`
-            :`<a href="${esc(m.path)}" download="${esc(m.filename||'file')}">⬇ ${esc(m.filename||'Download')}</a>`}
+          ${m.type==='repo_url'?`<a href="${safeUrl(m.path)}" target="_blank" rel="noopener noreferrer">🐙 ${esc(m.path)} ↗</a>`
+            :`<a href="${safeAttr(m.path)}" download="${esc(m.filename||'file')}">⬇ ${esc(m.filename||'Download')}</a>`}
           ${m.caption?`<div style="color:var(--muted2);font-size:.8rem;margin-top:.25rem">${esc(m.caption)}</div>`:''}
         </div>
         <div class="field-meta">
@@ -235,14 +258,14 @@ function renderMedia() {
 
 function mediaThumbHTML(m, blurred) {
   return `<div class="media-item${blurred?' media-blurred':''}">
-    <img class="screenshot-thumb" src="${m.path}"
-      onclick="${blurred?'unblurItem(this);':''} openLightbox('${m.path}','${esc(m.filename||'')}','${esc(m.local_path||'')}')"
+    <img class="screenshot-thumb" src="${safeAttr(m.path)}"
+      onclick="${blurred?'unblurItem(this);':''} openLightbox(${JSON.stringify(m.path)}, ${JSON.stringify(m.filename || '')}, ${JSON.stringify(m.local_path || '')})"
       onerror="this.style.opacity='0.15'" loading="lazy">
     <div class="media-caption"><span class="fname-badge" title="${esc(m.filename||'')}">${esc(m.filename||'')}</span></div>
     <div class="media-meta">
       <span class="field-time">⏱ ${fmtDt(m.added_at)}</span>
       <span style="display:flex;gap:.3rem;align-items:center">
-        <button class="rename-media-btn" onclick="renameMedia(${m.id},'${esc(m.filename||'')}')">✏️</button>
+        <button class="rename-media-btn" onclick="renameMedia(${m.id}, ${JSON.stringify(m.filename || '')})">✏️</button>
         <button class="field-del" onclick="deleteMedia(${m.id})">✕</button>
       </span>
     </div>
@@ -252,13 +275,13 @@ function mediaThumbHTML(m, blurred) {
 function videoThumbHTML(m, blurred) {
   return `<div class="media-item${blurred?' media-blurred':''}">
     <video controls class="screenshot-thumb" style="aspect-ratio:9/16;background:#000">
-      <source src="${m.path}">
+      <source src="${safeAttr(m.path)}">
     </video>
     <div class="media-caption"><span class="fname-badge">${esc(m.filename||'')}</span></div>
     <div class="media-meta">
       <span class="field-time">⏱ ${fmtDt(m.added_at)}</span>
       <span style="display:flex;gap:.3rem;align-items:center">
-        <button class="rename-media-btn" onclick="renameMedia(${m.id},'${esc(m.filename||'')}')">✏️</button>
+        <button class="rename-media-btn" onclick="renameMedia(${m.id}, ${JSON.stringify(m.filename || '')})">✏️</button>
         <button class="field-del" onclick="deleteMedia(${m.id})">✕</button>
       </span>
     </div>
@@ -286,12 +309,14 @@ function unblurItem(imgEl) {
   imgEl.closest('.media-item')?.classList.remove('media-blurred');
 }
 
-// ── Highlights ──────────────────────────────────────────────────────────────
 async function renderHighlights() {
   const sec = document.getElementById('highlights-section');
   if (!sec) return;
   let data = [];
-  try { data = await (await fetch(`${API}/api/people/${pid}/highlights`)).json(); } catch {}
+  try {
+    const res = await (await fetch(`${API}/api/people/${pid}/highlights`)).json();
+    data = res.highlights || [];
+  } catch {}
   if (!data.length) { sec.innerHTML = ''; return; }
   sec.innerHTML = `<div class="info-section">
     <h2>🎬 Instagram Highlights (${data.length})</h2>
@@ -300,7 +325,7 @@ async function renderHighlights() {
         <div class="ig-highlight-bubble" onclick="openHighlight(${h.id})">
           <div class="ig-hl-ring">
             <div class="ig-hl-thumb">
-              ${h.thumb?`<img src="${h.thumb}" loading="lazy" style="width:100%;height:100%;object-fit:cover">`:`<span style="font-size:1.8rem">📽️</span>`}
+              ${h.thumb?`<img src="${safeAttr(h.thumb)}" loading="lazy" style="width:100%;height:100%;object-fit:cover">`:`<span style="font-size:1.8rem">📽️</span>`}
             </div>
           </div>
           <div class="ig-hl-name">${esc(h.name)}</div>
@@ -311,22 +336,24 @@ async function renderHighlights() {
 }
 
 async function openHighlight(hlId) {
-  const stories = await (await fetch(`${API}/api/highlights/${hlId}/stories`)).json();
+  const { stories = [] } = await (await fetch(`${API}/api/highlights/${hlId}/stories`)).json();
   document.getElementById('hl-modal-body').innerHTML = `<div class="hl-stories-grid">
     ${stories.map(s=>s.is_video
-      ?`<div class="hl-story-item"><video controls class="hl-story-media"><source src="${s.path}"></video><div class="hl-story-date">${s.story_date||fmtDt(s.added_at)}</div></div>`
-      :`<div class="hl-story-item"><img class="hl-story-media" src="${s.path}" onclick="openLightbox('${s.path}','','')"><div class="hl-story-date">${s.story_date||fmtDt(s.added_at)}</div></div>`
+      ?`<div class="hl-story-item"><video controls class="hl-story-media"><source src="${safeAttr(s.path)}"></video><div class="hl-story-date">${esc(s.story_date||fmtDt(s.added_at))}</div></div>`
+      :`<div class="hl-story-item"><img class="hl-story-media" src="${safeAttr(s.path)}" onclick="openLightbox(${JSON.stringify(s.path)}, '', '')"><div class="hl-story-date">${esc(s.story_date||fmtDt(s.added_at))}</div></div>`
     ).join('')}
   </div>`;
   document.getElementById('hl-modal').classList.add('open');
 }
 
-// ── Feed Posts ────────────────────────────────────────────────────────────────
 async function renderFeedPosts() {
   const sec = document.getElementById('feed-section');
   if (!sec) return;
   let posts = [];
-  try { posts = await (await fetch(`${API}/api/people/${pid}/feed-posts`)).json(); } catch {}
+  try {
+    const res = await (await fetch(`${API}/api/people/${pid}/feed-posts`)).json();
+    posts = res.posts || [];
+  } catch {}
   if (!posts.length) { sec.innerHTML = ''; return; }
   sec.innerHTML = `<div class="info-section">
     <h2>📸 Instagram Posts / Reels (${posts.length})</h2>
@@ -336,11 +363,11 @@ async function renderFeedPosts() {
         return `<div class="feed-post-card" onclick="openFeedPost(${p.id})">
           <div class="feed-post-thumb">
             ${isVid
-              ?`<video class="feed-thumb-media" muted preload="none"><source src="${cover.path}"></video><span class="feed-type-badge">▶</span>`
-              :`<img class="feed-thumb-media" src="${cover?.path||''}" loading="lazy">`}
-            ${p.items.length>1?`<span class="feed-multi-badge">⊞ ${p.items.length}</span>`:''}
+              ?`<video class="feed-thumb-media" muted preload="none"><source src="${safeAttr(cover.path)}"></video><span class="feed-type-badge">▶</span>`
+              :`<img class="feed-thumb-media" src="${safeAttr(cover?.path||'')}" loading="lazy">`}
+            ${p.items?.length>1?`<span class="feed-multi-badge">⊞ ${p.items.length}</span>`:''}
           </div>
-          <div class="feed-post-date">${p.post_date||''}</div>
+          <div class="feed-post-date">${esc(p.post_date||'')}</div>
         </div>`;
       }).join('')}
     </div>
@@ -348,27 +375,30 @@ async function renderFeedPosts() {
 }
 
 async function openFeedPost(postId) {
-  const items = await (await fetch(`${API}/api/feed-posts/${postId}/items`)).json();
+  const { items = [] } = await (await fetch(`${API}/api/feed-posts/${postId}/items`)).json();
   document.getElementById('feed-modal-body').innerHTML = `<div class="hl-stories-grid">
     ${items.map(item=>item.is_video
-      ?`<div class="hl-story-item"><video controls class="hl-story-media"><source src="${item.path}"></video><div class="hl-story-date">${esc(item.filename||'')}</div></div>`
-      :`<div class="hl-story-item"><img class="hl-story-media" src="${item.path}" onclick="openLightbox('${item.path}','','')"><div class="hl-story-date">${esc(item.filename||'')}</div></div>`
+      ?`<div class="hl-story-item"><video controls class="hl-story-media"><source src="${safeAttr(item.path)}"></video><div class="hl-story-date">${esc(item.filename||'')}</div></div>`
+      :`<div class="hl-story-item"><img class="hl-story-media" src="${safeAttr(item.path)}" onclick="openLightbox(${JSON.stringify(item.path)}, '', '')"><div class="hl-story-date">${esc(item.filename||'')}</div></div>`
     ).join('')}
   </div>`;
   document.getElementById('feed-modal').classList.add('open');
 }
 
-// ── Add Field ──
 document.getElementById('add-field-form').addEventListener('submit', async e => {
   e.preventDefault();
   const fd = new FormData(e.target);
   const res = await fetch(`${API}/api/people/${pid}/fields`, { method: 'POST', body: fd });
   const data = await res.json();
-  if (data.ok) { showToast('Field added ✓'); e.target.reset(); await init(); }
-  else showToast('Error', 'error');
+  if (data.ok) {
+    showToast('Field added ✓');
+    e.target.reset();
+    await init();
+  } else {
+    showToast('Error', 'error');
+  }
 });
 
-// ── Media type change ──
 const typeSelect   = document.getElementById('media-type-select');
 const fileInput    = document.getElementById('media-file-input');
 const fileGroup    = document.getElementById('media-file-group');
@@ -412,14 +442,14 @@ function renderMultiPreview() {
       item.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:1.4rem;">📄</div>`;
     }
     const rm = document.createElement('button');
-    rm.className = 'rm'; rm.textContent = '✕';
+    rm.className = 'rm';
+    rm.textContent = '✕';
     rm.onclick = () => { queuedFiles.splice(i, 1); renderMultiPreview(); };
     item.appendChild(rm);
     multiPreview.appendChild(item);
   });
 }
 
-// ── Upload ──
 document.getElementById('add-media-form').addEventListener('submit', async e => {
   e.preventDefault();
   const btn = document.getElementById('upload-btn');
@@ -430,16 +460,23 @@ document.getElementById('add-media-form').addEventListener('submit', async e => 
   if (t === 'repo_url') {
     const url = e.target.querySelector('[name=repo_url]').value;
     if (!url) return showToast('Enter a URL', 'error');
-    btn.disabled = true; btn.textContent = 'Saving...';
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
     const fd = new FormData();
     fd.append('media_type', 'repo_url');
     fd.append('repo_url', url);
     if (cap) fd.append('caption', cap);
     const res = await fetch(`${API}/api/people/${pid}/media`, { method:'POST', body:fd });
     const data = await res.json();
-    if (data.ok) { showToast('Saved ✓'); e.target.reset(); await init(); }
-    else showToast('Error', 'error');
-    btn.disabled = false; btn.textContent = 'Upload';
+    if (data.ok) {
+      showToast('Saved ✓');
+      e.target.reset();
+      await init();
+    } else {
+      showToast('Error', 'error');
+    }
+    btn.disabled = false;
+    btn.textContent = 'Upload';
     return;
   }
 
@@ -464,40 +501,50 @@ document.getElementById('add-media-form').addEventListener('submit', async e => 
   bar.style.width = '100%';
   setTimeout(() => { bar.style.width = '0'; }, 600);
   showToast(`${files.length} file${files.length > 1 ? 's' : ''} uploaded ✓`);
-  queuedFiles = []; multiPreview.innerHTML = '';
+  queuedFiles = [];
+  multiPreview.innerHTML = '';
   e.target.reset();
-  btn.disabled = false; btn.textContent = 'Upload';
+  btn.disabled = false;
+  btn.textContent = 'Upload';
   await init();
 });
 
-// ── Delete ──
 async function deleteField(fid) {
   if (!confirm('Remove this field?')) return;
   await fetch(`${API}/api/fields/${fid}`, { method: 'DELETE' });
-  showToast('Removed'); await init();
+  showToast('Removed');
+  await init();
 }
 async function deleteMedia(mid) {
   if (!confirm('Remove this media?')) return;
   await fetch(`${API}/api/media/${mid}`, { method: 'DELETE' });
-  showToast('Removed'); await init();
+  showToast('Removed');
+  await init();
 }
 
 async function editName() {
   const newName = prompt('Rename:', personData.name);
   if (!newName || newName === personData.name) return;
-  const fd = new FormData(); fd.append('name', newName);
+  const fd = new FormData();
+  fd.append('name', newName);
   await fetch(`${API}/api/people/${pid}`, { method: 'PATCH', body: fd });
-  showToast('Renamed ✓'); await init();
+  showToast('Renamed ✓');
+  await init();
 }
 
 async function renameMedia(mid, current) {
   const newName = prompt('Rename file (keep extension):', current);
   if (!newName || newName === current) return;
-  const fd = new FormData(); fd.append('filename', newName);
+  const fd = new FormData();
+  fd.append('filename', newName);
   const res = await fetch(`${API}/api/media/${mid}/rename`, { method: 'PATCH', body: fd });
   const data = await res.json();
-  if (data.ok) { showToast('Renamed ✓'); await init(); }
-  else showToast('Error', 'error');
+  if (data.ok) {
+    showToast('Renamed ✓');
+    await init();
+  } else {
+    showToast('Error', 'error');
+  }
 }
 
 async function confirmDelete() {
@@ -507,7 +554,6 @@ async function confirmDelete() {
   setTimeout(() => location.href = '/', 600);
 }
 
-// ── Lightbox with local path ──
 function openLightbox(src, filename, localPath) {
   document.getElementById('lightbox-img').src = src;
   document.getElementById('lb-filename').textContent = filename || '';
@@ -525,18 +571,19 @@ function openLightbox(src, filename, localPath) {
 
 document.getElementById('lightbox').addEventListener('click', function(e) {
   const inner = document.getElementById('lb-inner');
-  if (!inner.contains(e.target))
-    this.classList.remove('open');
+  if (!inner.contains(e.target)) this.classList.remove('open');
 });
 document.getElementById('lb-close').addEventListener('click', () => {
   document.getElementById('lightbox').classList.remove('open');
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') document.getElementById('lightbox').classList.remove('open');
+  if (e.key === 'Escape') {
+    document.getElementById('lightbox').classList.remove('open');
+    document.getElementById('cat-modal')?.classList.remove('open');
+    document.getElementById('hl-modal')?.classList.remove('open');
+    document.getElementById('feed-modal')?.classList.remove('open');
+  }
 });
-
-// ════════ Instagram Tracker ════════
-let igSnapshots = [];
 
 async function loadIg() {
   const res = await fetch(`${API}/api/people/${pid}/ig-snapshots`);
@@ -623,7 +670,7 @@ function renderSnapList(snaps) {
 function renderDiffPanel() {
   if (igSnapshots.length < 2) return `<div class="section-empty">Import at least 2 snapshots to compare.</div>`;
   const opts = igSnapshots.map(s =>
-    `<option value="${s.id}">[${s.list_type}] ${esc(s.label||s.imported_at)} @${esc(s.ig_username)} (${s.count})</option>`).join('');
+    `<option value="${s.id}">[${esc(s.list_type)}] ${esc(s.label||s.imported_at)} @${esc(s.ig_username)} (${s.count})</option>`).join('');
   return `<div class="ig-diff-controls">
     <div class="form-group"><label>Old Snapshot</label><select id="diff-old">${opts}</select></div>
     <div class="form-group"><label>New Snapshot</label><select id="diff-new">${opts}</select></div>
@@ -655,11 +702,11 @@ async function viewSnapshot(sid) {
 function igCard(e) {
   const src = e.local_pic_path || e.profile_pic_url || '';
   const av  = src
-    ? `<img src="${esc(src)}" class="ig-avatar" onerror="this.outerHTML='<div class=ig-avatar-placeholder>👤</div>'">`
+    ? `<img src="${safeAttr(src)}" class="ig-avatar" onerror="this.outerHTML='<div class=ig-avatar-placeholder>👤</div>'">`
     : `<div class="ig-avatar-placeholder">👤</div>`;
   return `<div class="ig-entry-card">${av}
     <div class="ig-entry-info">
-      <div class="ig-entry-username"><a href="https://instagram.com/${esc(e.username)}" target="_blank">@${esc(e.username)} ↗</a></div>
+      <div class="ig-entry-username"><a href="https://instagram.com/${encodeURIComponent(e.username)}" target="_blank" rel="noopener noreferrer">@${esc(e.username)} ↗</a></div>
       <div class="ig-entry-name">${esc(e.full_name||'')}</div>
     </div></div>`;
 }
@@ -667,7 +714,8 @@ function igCard(e) {
 async function deleteSnapshot(sid) {
   if (!confirm('Delete this snapshot?')) return;
   await fetch(`${API}/api/ig-snapshots/${sid}`, {method:'DELETE'});
-  showToast('Deleted'); await loadIg();
+  showToast('Deleted');
+  await loadIg();
 }
 
 async function igImport(e) {
@@ -677,7 +725,9 @@ async function igImport(e) {
   const bar  = document.getElementById('ig-import-bar');
   const file = document.getElementById('ig-csv-input').files[0];
   if (!file) return showToast('Choose a CSV','error');
-  btn.disabled = true; btn.textContent = 'Importing…'; bar.style.width = '40%';
+  btn.disabled = true;
+  btn.textContent = 'Importing…';
+  bar.style.width = '40%';
   const csvText = await file.text();
   const fd = new FormData();
   fd.append('ig_username', form.ig_username.value.trim());
@@ -685,10 +735,17 @@ async function igImport(e) {
   fd.append('label',       form.label.value.trim());
   fd.append('csv_data',    csvText);
   const data = await (await fetch(`${API}/api/people/${pid}/ig-snapshots`, {method:'POST',body:fd})).json();
-  bar.style.width = '100%'; setTimeout(()=>{ bar.style.width='0'; },600);
-  if (data.ok) { showToast(`✅ Imported ${data.count} entries`); form.reset(); await loadIg(); }
-  else showToast('Import failed','error');
-  btn.disabled = false; btn.textContent = '📥 Import & Save';
+  bar.style.width = '100%';
+  setTimeout(()=>{ bar.style.width='0'; },600);
+  if (data.ok) {
+    showToast(`✅ Imported ${data.count} entries`);
+    form.reset();
+    await loadIg();
+  } else {
+    showToast('Import failed','error');
+  }
+  btn.disabled = false;
+  btn.textContent = '📥 Import & Save';
 }
 
 async function runDiff() {
@@ -721,14 +778,6 @@ async function runDiff() {
     </div>` : ''}`;
 }
 
-// ════════ Entry Point ════════
-async function init() {
-  await loadPerson();
-  await loadIg();
-}
-
-init();
-// ── Category ──────────────────────────────────────────────────────────────────
 const CAT_LABELS = {
   friend:'👋 Friends', close_friend:'💛 Close Friends',
   related:'🔗 Related to Friend/Close Friend',
@@ -757,13 +806,15 @@ function openCatModal() {
   document.getElementById('cat-modal')?.classList.add('open');
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+function bindCategoryModal() {
   const catModalClose = document.getElementById('cat-modal-close');
   const catModal      = document.getElementById('cat-modal');
   const catForm       = document.getElementById('cat-form');
 
   if (catModalClose) catModalClose.addEventListener('click', () => catModal?.classList.remove('open'));
-  if (catModal) catModal.addEventListener('click', e => { if (e.target === catModal) catModal.classList.remove('open'); });
+  if (catModal) catModal.addEventListener('click', e => {
+    if (e.target === catModal) catModal.classList.remove('open');
+  });
 
   if (catForm) catForm.addEventListener('submit', async e => {
     e.preventDefault();
@@ -776,8 +827,18 @@ document.addEventListener('DOMContentLoaded', () => {
         personData.category = newCat;
         updateCatBadge(newCat);
         catModal.classList.remove('open');
-        showToast && showToast('Category updated ✓');
+        showToast('Category updated ✓');
       }
-    } catch { alert('Failed to update category'); }
+    } catch {
+      alert('Failed to update category');
+    }
   });
-});
+}
+
+async function init() {
+  await loadPerson();
+  await loadIg();
+}
+
+bindCategoryModal();
+init();
