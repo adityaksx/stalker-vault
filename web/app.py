@@ -9,11 +9,15 @@ import random
 import zipfile
 import asyncio
 import traceback
-import re as _re
 from pathlib import Path
 from typing import Optional
 from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
+
+# FIX #3: sys.path must be set before any local imports
+BASE_DIR = Path(__file__).parent
+ROOT_DIR = BASE_DIR.parent
+sys.path.insert(0, str(ROOT_DIR))
 
 import httpx
 import instaloader
@@ -24,9 +28,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from playwright.sync_api import sync_playwright
 
-# ── Paths & config ─────────────────────────────────────────────────────────────
-BASE_DIR     = Path(__file__).parent
-ROOT_DIR     = BASE_DIR.parent
+# ── Paths & config ────────────────────────────────────────────────────────
 FRONTEND_DIR = ROOT_DIR / "frontend"
 STORAGE_DIR  = ROOT_DIR / "storage"
 UPLOADS_DIR  = ROOT_DIR / "uploads"
@@ -34,7 +36,6 @@ SESSION_FILE = BASE_DIR / ".ig_session"
 STATE_FILE   = BASE_DIR / "ig_browser_state.json"
 MIN_PFP_SIZE = 250
 
-sys.path.insert(0, str(ROOT_DIR))
 load_dotenv()
 
 IG_USER = os.getenv("IG_USERNAME", "")
@@ -53,7 +54,7 @@ TYPE_FOLDER = {
     "other":       "files",
 }
 
-# ── Lifespan ───────────────────────────────────────────────────────────────────
+# ── Lifespan ─────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from database.db import init_db
@@ -71,7 +72,7 @@ async def lifespan(app: FastAPI):
             print(f"[!] Instagram login failed: {ex}")
     yield
 
-# ── App ────────────────────────────────────────────────────────────────────────
+# ── App ──────────────────────────────────────────────────────────────────
 app = FastAPI(title="Vault", lifespan=lifespan)
 
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
@@ -82,7 +83,7 @@ app.mount("/static",  StaticFiles(directory=str(FRONTEND_DIR / "static")), name=
 app.mount("/storage", StaticFiles(directory=str(STORAGE_DIR)),             name="storage")
 app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)),             name="uploads")
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
+# ── Helpers ────────────────────────────────────────────────────────────────
 def safe_folder_name(name: str) -> str:
     s = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', name)
     s = re.sub(r'\s+', '_', s.strip())
@@ -95,7 +96,7 @@ def get_person_dir(pid: int, person_name: str, media_type: str) -> tuple[Path, s
     d.mkdir(parents=True, exist_ok=True)
     return d, folder, safe_name
 
-# ── Pages ──────────────────────────────────────────────────────────────────────
+# ── Pages ──────────────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 def index():
     return (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
@@ -104,7 +105,7 @@ def index():
 def person_page(pid: int):
     return (FRONTEND_DIR / "person.html").read_text(encoding="utf-8")
 
-# ── People ─────────────────────────────────────────────────────────────────────
+# ── People ───────────────────────────────────────────────────────────────────
 @app.get("/api/people")
 def api_list():
     from database.db import get_all_people
@@ -165,7 +166,7 @@ def api_delete(pid: int):
     delete_person(pid)
     return {"ok": True}
 
-# ── Fields ─────────────────────────────────────────────────────────────────────
+# ── Fields ───────────────────────────────────────────────────────────────────
 @app.post("/api/people/{pid}/fields")
 async def api_add_field(
     pid:        int,
@@ -183,7 +184,7 @@ def api_delete_field(fid: int):
     delete_field(fid)
     return {"ok": True}
 
-# ── Media ──────────────────────────────────────────────────────────────────────
+# ── Media ───────────────────────────────────────────────────────────────────
 @app.post("/api/people/{pid}/media")
 async def api_add_media(
     pid:        int,
@@ -246,7 +247,7 @@ async def api_rename_media(mid: int, filename: str = Form(...)):
     rename_media(mid, filename)
     return {"ok": True}
 
-# ── Instagram Snapshots ────────────────────────────────────────────────────────
+# ── Instagram Snapshots ──────────────────────────────────────────────────────────
 @app.get("/api/people/{pid}/ig-snapshots")
 def api_ig_snapshots(pid: int):
     from database.db import get_ig_snapshots
@@ -321,6 +322,7 @@ async def api_ig_import(
     print(f"[import] Done – HD: {hd_count}  rejected: {rejected_count}  total: {len(entries)}")
     return {"ok": True, "snapshot_id": sid, "count": len(entries)}
 
+# FIX #1: /diff MUST be registered before /{sid}/entries to avoid "diff" matching {sid}
 @app.get("/api/ig-snapshots/diff")
 def api_ig_diff(old_sid: int, new_sid: int):
     from database.db import get_ig_entries
@@ -356,7 +358,7 @@ def api_ig_delete_snapshot(sid: int):
     delete_ig_snapshot(sid)
     return {"ok": True}
 
-# ── Highlights ─────────────────────────────────────────────────────────────────
+# ── Highlights ───────────────────────────────────────────────────────────────────
 @app.post("/api/people/{pid}/highlights/import-zip")
 async def import_highlight_zip(pid: int, file: UploadFile = File(...)):
     from database.db import get_person, create_highlight, add_highlight_story
@@ -366,7 +368,7 @@ async def import_highlight_zip(pid: int, file: UploadFile = File(...)):
     content  = await file.read()
     zip_name = file.filename or "highlight.zip"
     stem     = zip_name.replace(".zip", "").replace(".ZIP", "")
-    m        = _re.match(r'^(.+?)_highlights?', stem, _re.IGNORECASE)
+    m        = re.match(r'^(.+?)_highlights?', stem, re.IGNORECASE)
     hl_name  = m.group(1).replace("_", " ").strip().title() if m else stem
     hl_id    = create_highlight(pid, hl_name, zip_name)
 
@@ -383,7 +385,7 @@ async def import_highlight_zip(pid: int, file: UploadFile = File(...)):
             is_video = ext in (".mp4", ".mov", ".webm", ".avi")
             if not (is_video or ext in (".jpg", ".jpeg", ".png", ".webp", ".heic")):
                 continue
-            dm       = _re.search(r'_(\d{2})_(\d{2})_(\d{4})_', base)
+            dm       = re.search(r'_(\d{2})_(\d{2})_(\d{4})_', base)
             date_str = f"{dm.group(3)}-{dm.group(2)}-{dm.group(1)}" if dm else None
             dest     = upload_dir / base
             with zf.open(entry) as sf, open(dest, "wb") as df:
@@ -397,15 +399,16 @@ async def import_highlight_zip(pid: int, file: UploadFile = File(...)):
 
     return {"ok": True, "name": hl_name, "story_count": count, "id": hl_id}
 
+# FIX #4: wrap list returns in dicts to match frontend expectations
 @app.get("/api/people/{pid}/highlights")
 def get_highlights(pid: int):
     from database.db import get_highlights as db_get_highlights
-    return db_get_highlights(pid)
+    return {"highlights": db_get_highlights(pid)}
 
 @app.get("/api/highlights/{hl_id}/stories")
 def get_highlight_stories(hl_id: int):
     from database.db import get_highlight_stories as db_get_highlight_stories
-    return db_get_highlight_stories(hl_id)
+    return {"stories": db_get_highlight_stories(hl_id)}
 
 # ── Feed Posts ─────────────────────────────────────────────────────────────────
 @app.post("/api/people/{pid}/feed-posts/import-zip")
@@ -414,13 +417,13 @@ async def import_feed_zip(pid: int, file: UploadFile = File(...)):
     if not get_person(pid):
         raise HTTPException(404, "Person not found")
 
-    content   = await file.read()
-    zip_name  = file.filename or "feed.zip"
+    content    = await file.read()
+    zip_name   = file.filename or "feed.zip"
     upload_dir = UPLOADS_DIR / str(pid) / "feed"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     def parse_date(name: str) -> str:
-        dm = _re.search(r'_(\d{2})_(\d{2})_(\d{4})_', name)
+        dm = re.search(r'_(\d{2})_(\d{2})_(\d{4})_', name)
         return f"{dm.group(3)}-{dm.group(2)}-{dm.group(1)}" if dm else "unknown"
 
     groups: dict[str, list] = {}
@@ -451,14 +454,14 @@ async def import_feed_zip(pid: int, file: UploadFile = File(...)):
 @app.get("/api/people/{pid}/feed-posts")
 def get_feed_posts(pid: int):
     from database.db import get_feed_posts as db_get_feed_posts
-    return db_get_feed_posts(pid)
+    return {"posts": db_get_feed_posts(pid)}
 
 @app.get("/api/feed-posts/{post_id}/items")
 def get_feed_post_items(post_id: int):
     from database.db import get_feed_post_items as db_get_feed_post_items
-    return db_get_feed_post_items(post_id)
+    return {"items": db_get_feed_post_items(post_id)}
 
-# ── Instagram PFP fetching ─────────────────────────────────────────────────────
+# ── Instagram PFP fetching ─────────────────────────────────────────────────────────
 def _get_browser_cookies() -> dict:
     if STATE_FILE.exists():
         try:
@@ -673,7 +676,8 @@ async def fetch_and_save_pfp(username: str, save_dir: Path):
     if not data:
         print(f"[fallback] @{username} – API failed, trying Playwright…")
         try:
-            loop = asyncio.get_event_loop()
+            # FIX #2: use get_running_loop() instead of deprecated get_event_loop()
+            loop = asyncio.get_running_loop()
             data, pic_url = await loop.run_in_executor(_executor, _playwright_fetch_sync, username)
             if data:
                 print(f"[SUCCESS] @{username} – fetched via Playwright")
