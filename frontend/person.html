@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Person — Vault</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css"/>
 </head>
@@ -35,9 +36,10 @@
         <div class="import-title">Instagram Highlights ZIP</div>
         <div class="import-desc">Export your Highlights as a ZIP. Stories are grouped automatically by highlight name.</div>
         <form id="hl-import-form" enctype="multipart/form-data">
-          <label class="file-upload-label">
-            <input type="file" name="file" accept=".zip" required style="display:none" onchange="submitHighlightZip(this)">
-            <span class="btn btn-secondary btn-sm" onclick="this.previousElementSibling.click()">📂 Choose ZIP</span>
+          <!-- FIX #6: use for= on label, remove onclick to prevent double file-picker -->
+          <label class="file-upload-label" for="hl-zip-input">
+            <input type="file" id="hl-zip-input" name="file" accept=".zip" required style="display:none" onchange="submitHighlightZip(this)">
+            <span class="btn btn-secondary btn-sm">📂 Choose ZIP</span>
           </label>
         </form>
         <div id="hl-import-status" style="font-size:.8rem;color:var(--muted2);margin-top:.4rem"></div>
@@ -47,9 +49,10 @@
         <div class="import-title">Instagram Feed / Reels ZIP</div>
         <div class="import-desc">Export posts &amp; reels as a ZIP. Photos/videos are grouped by date into posts.</div>
         <form id="feed-import-form" enctype="multipart/form-data">
-          <label class="file-upload-label">
-            <input type="file" name="file" accept=".zip" required style="display:none" onchange="submitFeedZip(this)">
-            <span class="btn btn-secondary btn-sm" onclick="this.previousElementSibling.click()">📂 Choose ZIP</span>
+          <!-- FIX #6: use for= on label, remove onclick to prevent double file-picker -->
+          <label class="file-upload-label" for="feed-zip-input">
+            <input type="file" id="feed-zip-input" name="file" accept=".zip" required style="display:none" onchange="submitFeedZip(this)">
+            <span class="btn btn-secondary btn-sm">📂 Choose ZIP</span>
           </label>
         </form>
         <div id="feed-import-status" style="font-size:.8rem;color:var(--muted2);margin-top:.4rem"></div>
@@ -159,7 +162,8 @@
             <label>Files <span style="color:var(--muted);font-size:0.72rem;font-weight:400;text-transform:none;" id="multi-hint">(select multiple)</span></label>
             <label class="file-label">
               📂 Click or drag files here
-              <input type="file" id="media-file-input" accept="image/*" multiple/>
+              <!-- FIX #4: permissive accept so video/audio/zip work before JS refines it -->
+              <input type="file" id="media-file-input" accept="image/*,video/*,audio/*,.zip,.pdf,.txt" multiple/>
             </label>
             <div class="multi-preview" id="multi-preview"></div>
           </div>
@@ -187,7 +191,6 @@
 </div>
 
 <!-- Lightbox -->
-<!-- Lightbox -->
 <div class="lightbox" id="lightbox">
   <button class="lightbox-close" id="lb-close">✕</button>
   <div id="lb-inner" style="display:flex;flex-direction:column;align-items:center;gap:0.75rem;max-width:90vw;">
@@ -213,33 +216,7 @@
 
 <div class="toast" id="toast"></div>
 
-<!-- Change Category Modal -->
-<div class="modal-overlay" id="cat-modal">
-  <div class="modal" role="dialog" aria-modal="true">
-    <h2>🏷 Change Category</h2>
-    <form id="cat-form">
-      <div class="form-group">
-        <label>Category</label>
-        <select id="cat-select" name="category">
-          <option value="friend">👋 Friends</option>
-          <option value="close_friend">💛 Close Friends</option>
-          <option value="related">🔗 Related to Friend/Close Friend</option>
-          <option value="random">🌐 Random (Found Online)</option>
-          <option value="misc">🗂️ Misc.</option>
-          <option value="archived">📦 Archived</option>
-        </select>
-      </div>
-      <div class="form-actions">
-        <button type="button" class="btn btn-secondary" id="cat-modal-close">Cancel</button>
-        <button type="submit" class="btn btn-primary">Save →</button>
-      </div>
-    </form>
-  </div>
-</div>
-
-<script src="/static/person.js"></script>
-
-<!-- Category Modal -->
+<!-- FIX #1: Only ONE cat-modal, kept the version with aria-labelledby -->
 <div class="modal-overlay" id="cat-modal">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="cat-modal-title">
     <h2 id="cat-modal-title">🏷 Change Category</h2>
@@ -285,9 +262,13 @@
   </div>
 </div>
 
+<!-- FIX #2: person.js moved to end of body so all modals exist in DOM when it runs -->
+<script src="/static/person.js"></script>
+
 <script>
 // ZIP import helpers
-const pid = window.location.pathname.split('/').pop();
+// FIX #3: strip trailing slash before pop() so pid is never empty
+const pid = window.location.pathname.replace(/\/$/, '').split('/').pop();
 const API = '';
 
 async function submitHighlightZip(input) {
