@@ -52,7 +52,6 @@ def init_db():
     )""")
     conn.commit()
     conn.close()
-    # FIX #1: both helpers called inside init_db at the same level
     init_ig_tables()
     init_highlight_tables()
 
@@ -271,46 +270,53 @@ def update_media_path(media_id: int, path: str, local_path: str):
 # ═══════════════════════════════════════════════════════════════
 
 def init_highlight_tables():
-    # FIX #2: use a proper cursor, not the connection object directly
     conn = get_connection()
     c = conn.cursor()
-    c.executescript("""
+    # Use individual execute() calls (NOT executescript) so the connection's
+    # transaction is preserved and conn.commit() actually persists the DDL.
+    c.execute("""
     CREATE TABLE IF NOT EXISTS ig_highlights (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        person_id   INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+        person_id   INTEGER NOT NULL,
         name        TEXT NOT NULL,
         zip_name    TEXT,
-        imported_at TEXT DEFAULT (datetime('now'))
-    );
+        imported_at TEXT DEFAULT (datetime('now','localtime')),
+        FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+    )""")
+    c.execute("""
     CREATE TABLE IF NOT EXISTS ig_highlight_stories (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
-        highlight_id INTEGER NOT NULL REFERENCES ig_highlights(id) ON DELETE CASCADE,
+        highlight_id INTEGER NOT NULL,
         filename     TEXT,
         path         TEXT,
         is_video     INTEGER DEFAULT 0,
         story_date   TEXT,
-        added_at     TEXT DEFAULT (datetime('now'))
-    );
+        added_at     TEXT DEFAULT (datetime('now','localtime')),
+        FOREIGN KEY (highlight_id) REFERENCES ig_highlights(id) ON DELETE CASCADE
+    )""")
+    c.execute("""
     CREATE TABLE IF NOT EXISTS feed_posts (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        person_id   INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+        person_id   INTEGER NOT NULL,
         post_date   TEXT,
         zip_name    TEXT,
-        added_at    TEXT DEFAULT (datetime('now'))
-    );
+        added_at    TEXT DEFAULT (datetime('now','localtime')),
+        FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+    )""")
+    c.execute("""
     CREATE TABLE IF NOT EXISTS feed_post_items (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        post_id     INTEGER NOT NULL REFERENCES feed_posts(id) ON DELETE CASCADE,
+        post_id     INTEGER NOT NULL,
         filename    TEXT,
         path        TEXT,
         is_video    INTEGER DEFAULT 0,
         item_date   TEXT,
-        added_at    TEXT DEFAULT (datetime('now'))
-    );
-    """)
+        added_at    TEXT DEFAULT (datetime('now','localtime')),
+        FOREIGN KEY (post_id) REFERENCES feed_posts(id) ON DELETE CASCADE
+    )""")
+    conn.commit()   # ← was missing; without this DDL is rolled back on conn.close()
     conn.close()
 
-# FIX #3: all highlight/feed write functions use consistent conn+cursor pattern
 def create_highlight(person_id, name, zip_name=None):
     conn = get_connection()
     c = conn.cursor()
