@@ -69,7 +69,7 @@ function fmtDt(iso) {
   } catch { return iso; }
 }
 function esc(s) {
-  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 async function loadPerson() {
@@ -357,58 +357,6 @@ async function openFeedPost(postId) {
   </div>`;
   document.getElementById('feed-modal').classList.add('open');
 }
-
-// ── Category ──────────────────────────────────────────────────────────────────
-const CAT_LABELS = {
-  friend:'👋 Friends', close_friend:'💛 Close Friends',
-  related:'🔗 Related to Friend/Close Friend',
-  random:'🌐 Random (Found Online)', misc:'🗂️ Misc.', archived:'📦 Archived',
-};
-const CAT_COLORS = {
-  friend:'#a78bfa', close_friend:'#fbbf24', related:'#38bdf8',
-  random:'#34d399', misc:'#f472b6', archived:'#5a5a7a',
-};
-
-function updateCatBadge(cat) {
-  const badge = document.getElementById('person-cat-badge');
-  if (!badge) return;
-  const c = cat||'random';
-  badge.textContent  = CAT_LABELS[c]||c;
-  badge.style.background  = (CAT_COLORS[c]||'#888')+'22';
-  badge.style.color       = CAT_COLORS[c]||'#888';
-  badge.style.borderColor = (CAT_COLORS[c]||'#888')+'66';
-}
-
-function openCatModal() {
-  const sel = document.getElementById('cat-select');
-  if (sel) sel.value = personData?.category||'random';
-  document.getElementById('cat-modal')?.classList.add('open');
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  ['cat-modal','hl-modal','feed-modal'].forEach(id => {
-    document.getElementById(id)?.addEventListener('click', e => {
-      if (e.target.id === id) document.getElementById(id).classList.remove('open');
-    });
-  });
-  document.getElementById('cat-modal-close')?.addEventListener('click',
-    () => document.getElementById('cat-modal')?.classList.remove('open'));
-
-  document.getElementById('cat-form')?.addEventListener('submit', async e => {
-    e.preventDefault();
-    const newCat = document.getElementById('cat-select').value;
-    const fd = new FormData(); fd.append('category', newCat);
-    const r = await fetch(`${API}/api/people/${pid}/category`,{method:'PATCH',body:fd});
-    const d = await r.json();
-    if (d.ok) {
-      personData.category = newCat;
-      updateCatBadge(newCat);
-      document.getElementById('cat-modal').classList.remove('open');
-      showToast('Category updated ✓');
-    }
-  });
-});
-
 
 // ── Add Field ──
 document.getElementById('add-field-form').addEventListener('submit', async e => {
