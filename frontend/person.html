@@ -36,7 +36,6 @@
         <div class="import-title">Instagram Highlights ZIP</div>
         <div class="import-desc">Export your Highlights as a ZIP. Stories are grouped automatically by highlight name.</div>
         <form id="hl-import-form" enctype="multipart/form-data">
-          <!-- FIX #6: use for= on label, remove onclick to prevent double file-picker -->
           <label class="file-upload-label" for="hl-zip-input">
             <input type="file" id="hl-zip-input" name="file" accept=".zip" required style="display:none" onchange="submitHighlightZip(this)">
             <span class="btn btn-secondary btn-sm">📂 Choose ZIP</span>
@@ -49,7 +48,6 @@
         <div class="import-title">Instagram Feed / Reels ZIP</div>
         <div class="import-desc">Export posts &amp; reels as a ZIP. Photos/videos are grouped by date into posts.</div>
         <form id="feed-import-form" enctype="multipart/form-data">
-          <!-- FIX #6: use for= on label, remove onclick to prevent double file-picker -->
           <label class="file-upload-label" for="feed-zip-input">
             <input type="file" id="feed-zip-input" name="file" accept=".zip" required style="display:none" onchange="submitFeedZip(this)">
             <span class="btn btn-secondary btn-sm">📂 Choose ZIP</span>
@@ -162,7 +160,6 @@
             <label>Files <span style="color:var(--muted);font-size:0.72rem;font-weight:400;text-transform:none;" id="multi-hint">(select multiple)</span></label>
             <label class="file-label">
               📂 Click or drag files here
-              <!-- FIX #4: permissive accept so video/audio/zip work before JS refines it -->
               <input type="file" id="media-file-input" accept="image/*,video/*,audio/*,.zip,.pdf,.txt" multiple/>
             </label>
             <div class="multi-preview" id="multi-preview"></div>
@@ -216,7 +213,6 @@
 
 <div class="toast" id="toast"></div>
 
-<!-- FIX #1: Only ONE cat-modal, kept the version with aria-labelledby -->
 <div class="modal-overlay" id="cat-modal">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="cat-modal-title">
     <h2 id="cat-modal-title">🏷 Change Category</h2>
@@ -262,27 +258,38 @@
   </div>
 </div>
 
-<!-- FIX #2: person.js moved to end of body so all modals exist in DOM when it runs -->
+<!-- person.js MUST come before the inline script — pid & API are declared there -->
 <script src="/static/person.js"></script>
 
 <script>
-// ZIP import helpers
-// FIX #3: strip trailing slash before pop() so pid is never empty
-const pid = window.location.pathname.replace(/\/$/, '').split('/').pop();
-const API = '';
+// ── ZIP import helpers ────────────────────────────────────────────────────
+// NOTE: `pid` and `API` are already declared in person.js above.
+// Do NOT re-declare them here — that causes:
+//   Uncaught SyntaxError: Identifier 'pid' has already been declared
 
 async function submitHighlightZip(input) {
   const statusEl = document.getElementById('hl-import-status');
   const file = input.files[0];
   if (!file) return;
   statusEl.textContent = '⏳ Uploading…';
-  const fd = new FormData(); fd.append('file', file);
+  statusEl.style.color = 'var(--muted2)';
+  const fd = new FormData();
+  fd.append('file', file);
   try {
-    const r = await fetch(`${API}/api/people/${pid}/highlights/import-zip`, {method:'POST', body:fd});
+    const r = await fetch(`${API}/api/people/${pid}/highlights/import-zip`, { method: 'POST', body: fd });
     const d = await r.json();
-    statusEl.textContent = d.ok ? `✅ Imported "${d.name}" (${d.story_count} stories)` : '❌ Failed';
-    if (d.ok) setTimeout(() => location.reload(), 1200);
-  } catch(e) { statusEl.textContent = '❌ Error: ' + e.message; }
+    if (d.ok) {
+      statusEl.textContent = `✅ Imported successfully — "${d.name}" (${d.story_count} stories) saved in /storage`;
+      statusEl.style.color = '#4ade80';
+      setTimeout(() => location.reload(), 1500);
+    } else {
+      statusEl.textContent = '❌ Import failed';
+      statusEl.style.color = '#f87171';
+    }
+  } catch (e) {
+    statusEl.textContent = '❌ Error: ' + e.message;
+    statusEl.style.color = '#f87171';
+  }
 }
 
 async function submitFeedZip(input) {
@@ -290,13 +297,24 @@ async function submitFeedZip(input) {
   const file = input.files[0];
   if (!file) return;
   statusEl.textContent = '⏳ Uploading…';
-  const fd = new FormData(); fd.append('file', file);
+  statusEl.style.color = 'var(--muted2)';
+  const fd = new FormData();
+  fd.append('file', file);
   try {
-    const r = await fetch(`${API}/api/people/${pid}/feed-posts/import-zip`, {method:'POST', body:fd});
+    const r = await fetch(`${API}/api/people/${pid}/feed-posts/import-zip`, { method: 'POST', body: fd });
     const d = await r.json();
-    statusEl.textContent = d.ok ? `✅ Imported ${d.post_count} posts` : '❌ Failed';
-    if (d.ok) setTimeout(() => location.reload(), 1200);
-  } catch(e) { statusEl.textContent = '❌ Error: ' + e.message; }
+    if (d.ok) {
+      statusEl.textContent = `✅ Imported successfully — ${d.post_count} posts saved in /storage`;
+      statusEl.style.color = '#4ade80';
+      setTimeout(() => location.reload(), 1500);
+    } else {
+      statusEl.textContent = '❌ Import failed';
+      statusEl.style.color = '#f87171';
+    }
+  } catch (e) {
+    statusEl.textContent = '❌ Error: ' + e.message;
+    statusEl.style.color = '#f87171';
+  }
 }
 </script>
 
