@@ -424,27 +424,23 @@ def _parse_media_date(filename: str) -> str | None:
 @app.post("/api/people/{pid}/highlights/import-zip")
 async def import_highlight_zip(pid: int, file: UploadFile = File(...)):
     from database.db import get_person, create_highlight, add_highlight_story
-    if not get_person(pid):
+    row = get_person(pid)
+    if not row:
         raise HTTPException(404, "Person not found")
 
-    content  = await file.read()
-    zip_name = file.filename or "highlight.zip"
+    person_name = row[1]
+    safe_name   = safe_folder_name(person_name)
+    content     = await file.read()
+    zip_name    = file.filename or "highlight.zip"
 
-    # _parse_hl_name_from_zip strips the " (N)" suffix so display names are
-    # clean, but we ALWAYS call create_highlight() which inserts a fresh row —
-    # so "highlights_2026.zip" and "highlights_2026 (1).zip" become two
-    # separate hl_id values and two separate upload folders.
     hl_name = _parse_hl_name_from_zip(zip_name)
     hl_id   = create_highlight(pid, hl_name, zip_name)
 
-    upload_dir = UPLOADS_DIR / str(pid) / "highlights" / str(hl_id)
+    upload_dir = STORAGE_DIR / safe_name / "highlights" / str(hl_id)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    # seen_bases prevents double-importing when a ZIP nests the same file
-    # under multiple subdirectories (uncommon but possible in some exports).
     seen_bases: set[str] = set()
     count = 0
-
     with zipfile.ZipFile(io.BytesIO(content)) as zf:
         for entry in sorted(zf.namelist()):
             base = Path(entry).name
@@ -454,16 +450,13 @@ async def import_highlight_zip(pid: int, file: UploadFile = File(...)):
             is_video = ext in ('.mp4', '.mov', '.webm', '.avi')
             if not (is_video or ext in ('.jpg', '.jpeg', '.png', '.webp', '.heic')):
                 continue
-
-            date_str = _parse_media_date(base)   # None when pattern absent — stored as NULL
-
+            date_str = _parse_media_date(base)
             dest = upload_dir / base
             with zf.open(entry) as sf, open(dest, 'wb') as df:
                 df.write(sf.read())
-
             add_highlight_story(
                 hl_id, base,
-                f"/uploads/{pid}/highlights/{hl_id}/{base}",
+                f"/storage/{safe_name}/highlights/{hl_id}/{base}",
                 is_video, date_str,
             )
             seen_bases.add(base)
@@ -474,13 +467,14 @@ async def import_highlight_zip(pid: int, file: UploadFile = File(...)):
 
 @app.delete("/api/highlights/{hl_id}")
 def delete_highlight_route(hl_id: int):
-    """Delete a highlight and all its stored media files."""
-    from database.db import get_highlight_by_id, delete_highlight as db_del_hl
+    from database.db import get_highlight_by_id, delete_highlight as db_del_hl, get_person
     row = get_highlight_by_id(hl_id)
     if row:
-        folder = UPLOADS_DIR / str(row["person_id"]) / "highlights" / str(hl_id)
-        if folder.exists():
-            shutil.rmtree(folder, ignore_errors=True)
+        person = get_person(row["person_id"])
+        if person:
+            folder = STORAGE_DIR / safe_folder_name(person[1]) / "highlights" / str(hl_id)
+            if folder.exists():
+                shutil.rmtree(folder, ignore_errors=True)
     db_del_hl(hl_id)
     return {"ok": True}
 
@@ -514,13 +508,15 @@ def get_highlight_stories(hl_id: int):
 @app.post("/api/people/{pid}/feed-posts/import-zip")
 async def import_feed_zip(pid: int, file: UploadFile = File(...)):
     from database.db import get_person, create_feed_post, add_feed_post_item
-    if not get_person(pid):
+    row = get_person(pid)
+    if not row:
         raise HTTPException(404, "Person not found")
 
-    content  = await file.read()
-    zip_name = file.filename or "feed.zip"
+    person_name = row[1]
+    safe_name   = safe_folder_name(person_name)
+    content     = await file.read()
+    zip_name    = file.filename or "feed.zip"
 
-    # ── Pass 1: scan ZIP, group entries by date ──────────────────────────────
     groups: dict[str, list] = {}
     with zipfile.ZipFile(io.BytesIO(content)) as zf:
         for entry in sorted(zf.namelist()):
@@ -534,13 +530,11 @@ async def import_feed_zip(pid: int, file: UploadFile = File(...)):
             date_key = _parse_media_date(base) or "unknown"
             groups.setdefault(date_key, []).append((entry, base, is_video))
 
-    # ── Pass 2: create one feed_post row per date, extract media ────────────
     post_count = 0
     with zipfile.ZipFile(io.BytesIO(content)) as zf:
         for date_key, items in sorted(groups.items()):
             post_id  = create_feed_post(pid, date_key, zip_name)
-            # Isolated subfolder per post — prevents cross-post filename collisions
-            post_dir = UPLOADS_DIR / str(pid) / "feed" / str(post_id)
+            post_dir = STORAGE_DIR / safe_name / "feed" / str(post_id)
             post_dir.mkdir(parents=True, exist_ok=True)
             for entry, base, is_video in items:
                 dest = post_dir / base
@@ -548,7 +542,7 @@ async def import_feed_zip(pid: int, file: UploadFile = File(...)):
                     df.write(sf.read())
                 add_feed_post_item(
                     post_id, base,
-                    f"/uploads/{pid}/feed/{post_id}/{base}",
+                    f"/storage/{safe_name}/feed/{post_id}/{base}",
                     is_video, date_key,
                 )
             post_count += 1
@@ -558,13 +552,14 @@ async def import_feed_zip(pid: int, file: UploadFile = File(...)):
 
 @app.delete("/api/feed-posts/{post_id}")
 def delete_feed_post_route(post_id: int):
-    """Delete a feed post and all its stored media files."""
-    from database.db import get_feed_post_by_id, delete_feed_post as db_del_fp
+    from database.db import get_feed_post_by_id, delete_feed_post as db_del_fp, get_person
     row = get_feed_post_by_id(post_id)
     if row:
-        folder = UPLOADS_DIR / str(row["person_id"]) / "feed" / str(post_id)
-        if folder.exists():
-            shutil.rmtree(folder, ignore_errors=True)
+        person = get_person(row["person_id"])
+        if person:
+            folder = STORAGE_DIR / safe_folder_name(person[1]) / "feed" / str(post_id)
+            if folder.exists():
+                shutil.rmtree(folder, ignore_errors=True)
     db_del_fp(post_id)
     return {"ok": True}
 
