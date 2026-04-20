@@ -8,3 +8,4 @@ __pycache__/
 .ig_session
 web/ig_browser_state.json
 /Backup
+/uploads
