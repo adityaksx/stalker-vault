@@ -176,13 +176,13 @@ function renderFields() {
       </div>`).join('');
 }
 
-function renderMedia() {
+async function renderMedia() {
   const media = personData.media || [];
   if (!media.length) {
     document.getElementById('media-section').innerHTML =
       `<div class="section-empty">No media added yet.</div>`;
-    renderHighlights();
-    renderFeedPosts();
+    await renderHighlights();
+    await renderFeedPosts();
     return;
   }
   const photos = media.filter(m => ['photo','screenshot','profile_pic'].includes(m.type));
@@ -252,8 +252,8 @@ function renderMedia() {
   }
 
   document.getElementById('media-section').innerHTML = html;
-  renderHighlights();
-  renderFeedPosts();
+  await renderHighlights();
+  await renderFeedPosts();
 }
 
 function mediaThumbHTML(m, blurred) {
@@ -314,36 +314,79 @@ async function renderHighlights() {
   if (!sec) return;
   let data = [];
   try {
-    const res = await (await fetch(`${API}/api/people/${pid}/highlights`)).json();
-    data = res.highlights || [];
-  } catch {}
+    const res = await fetch(`${API}/api/people/${pid}/highlights`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    data = json.highlights || [];
+  } catch(e) { console.error('[Vault] renderHighlights failed:', e); return; }
   if (!data.length) { sec.innerHTML = ''; return; }
   sec.innerHTML = `<div class="info-section">
     <h2>🎬 Instagram Highlights (${data.length})</h2>
     <div class="ig-highlights-row">
       ${data.map(h=>`
-        <div class="ig-highlight-bubble" onclick="openHighlight(${h.id})">
-          <div class="ig-hl-ring">
-            <div class="ig-hl-thumb">
-              ${h.thumb?`<img src="${safeAttr(h.thumb)}" loading="lazy" style="width:100%;height:100%;object-fit:cover">`:`<span style="font-size:1.8rem">📽️</span>`}
+        <div class="ig-highlight-bubble-wrap">
+          <div class="ig-highlight-bubble" onclick="openHighlight(${h.id})">
+            <div class="ig-hl-ring">
+              <div class="ig-hl-thumb">
+                ${h.thumb
+                  ? `<img src="${safeAttr(h.thumb)}" loading="lazy" style="width:100%;height:100%;object-fit:cover">`
+                  : `<span style="font-size:1.8rem">📽️</span>`}
+              </div>
             </div>
+            <div class="ig-hl-name">${esc(h.name)}</div>
+            <div class="ig-hl-count">${h.story_count} stories</div>
           </div>
-          <div class="ig-hl-name">${esc(h.name)}</div>
-          <div class="ig-hl-count">${h.story_count} stories</div>
+          <button class="hl-del-btn" title="Delete highlight"
+            onclick="deleteHighlight(event,${h.id})">🗑</button>
         </div>`).join('')}
     </div>
   </div>`;
 }
 
+async function deleteHighlight(e, hlId) {
+  e.stopPropagation();
+  if (!confirm('Delete this highlight and all its stories?')) return;
+  try {
+    const r = await fetch(`${API}/api/highlights/${hlId}`, {method:'DELETE'});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    showToast('Highlight deleted');
+    await renderHighlights();
+  } catch(err) { console.error('[Vault] deleteHighlight failed:', err); showToast('Delete failed','error'); }
+}
+
 async function openHighlight(hlId) {
-  const { stories = [] } = await (await fetch(`${API}/api/highlights/${hlId}/stories`)).json();
-  document.getElementById('hl-modal-body').innerHTML = `<div class="hl-stories-grid">
-    ${stories.map(s=>s.is_video
-      ?`<div class="hl-story-item"><video controls class="hl-story-media"><source src="${safeAttr(s.path)}"></video><div class="hl-story-date">${esc(s.story_date||fmtDt(s.added_at))}</div></div>`
-      :`<div class="hl-story-item"><img class="hl-story-media" src="${safeAttr(s.path)}" onclick="openLightbox(${JSON.stringify(s.path)}, '', '')"><div class="hl-story-date">${esc(s.story_date||fmtDt(s.added_at))}</div></div>`
-    ).join('')}
-  </div>`;
-  document.getElementById('hl-modal').classList.add('open');
+  const modal = document.getElementById('hl-modal');
+  const body  = document.getElementById('hl-modal-body');
+  body.innerHTML = `<p style="text-align:center;padding:2rem;color:var(--muted2)">⏳ Loading…</p>`;
+  modal.classList.add('open');
+  try {
+    const res = await fetch(`${API}/api/highlights/${hlId}/stories`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { stories = [] } = await res.json();
+    if (!stories.length) {
+      body.innerHTML = `<p style="text-align:center;padding:2rem;color:var(--muted2)">No stories found.</p>`;
+      return;
+    }
+    body.innerHTML = `<div class="hl-stories-grid">
+      ${stories.map(s => s.is_video
+        ? `<div class="hl-story-item">
+             <video controls class="hl-story-media" preload="metadata">
+               <source src="${safeAttr(s.path)}">
+             </video>
+             <div class="hl-story-date">${esc(s.story_date || fmtDt(s.added_at))}</div>
+           </div>`
+        : `<div class="hl-story-item">
+             <img class="hl-story-media" src="${safeAttr(s.path)}" loading="lazy"
+               onerror="this.style.opacity='0.15'"
+               onclick="openLightbox(${JSON.stringify(s.path)}, ${JSON.stringify(s.filename||'')}, '')">
+             <div class="hl-story-date">${esc(s.story_date || fmtDt(s.added_at))}</div>
+           </div>`
+      ).join('')}
+    </div>`;
+  } catch(e) {
+    console.error('[Vault] openHighlight failed:', e);
+    body.innerHTML = `<p style="text-align:center;padding:2rem;color:var(--color-error)">Failed to load stories.</p>`;
+  }
 }
 
 async function renderFeedPosts() {
@@ -351,41 +394,84 @@ async function renderFeedPosts() {
   if (!sec) return;
   let posts = [];
   try {
-    const res = await (await fetch(`${API}/api/people/${pid}/feed-posts`)).json();
-    posts = res.posts || [];
-  } catch {}
+    const res = await fetch(`${API}/api/people/${pid}/feed-posts`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    posts = json.posts || [];
+  } catch(e) { console.error('[Vault] renderFeedPosts failed:', e); return; }
   if (!posts.length) { sec.innerHTML = ''; return; }
   sec.innerHTML = `<div class="info-section">
     <h2>📸 Instagram Posts / Reels (${posts.length})</h2>
     <div class="feed-posts-grid">
-      ${posts.map(p=>{
-        const cover=p.items?.[0], isVid=cover?.is_video;
-        return `<div class="feed-post-card" onclick="openFeedPost(${p.id})">
-          <div class="feed-post-thumb">
-            ${isVid
-              ?`<video class="feed-thumb-media" muted preload="none"><source src="${safeAttr(cover.path)}"></video><span class="feed-type-badge">▶</span>`
-              :`<img class="feed-thumb-media" src="${safeAttr(cover?.path||'')}" loading="lazy">`}
-            ${p.items?.length>1?`<span class="feed-multi-badge">⊞ ${p.items.length}</span>`:''}
+      ${posts.map(p => {
+        const cover = p.items?.[0], isVid = cover?.is_video;
+        return `<div class="feed-post-card-wrap">
+          <div class="feed-post-card" onclick="openFeedPost(${p.id})">
+            <div class="feed-post-thumb">
+              ${isVid
+                ? `<video class="feed-thumb-media" muted preload="none">
+                     <source src="${safeAttr(cover.path)}">
+                   </video>
+                   <span class="feed-type-badge">▶</span>`
+                : `<img class="feed-thumb-media" src="${safeAttr(cover?.path||'')}"
+                     loading="lazy" onerror="this.style.opacity='0.15'">`}
+              ${p.items?.length > 1
+                ? `<span class="feed-multi-badge">⊞ ${p.items.length}</span>`
+                : ''}
+            </div>
+            <div class="feed-post-date">${esc(p.post_date||'')}</div>
           </div>
-          <div class="feed-post-date">${esc(p.post_date||'')}</div>
+          <button class="feed-del-btn" title="Delete post"
+            onclick="deleteFeedPost(event,${p.id})">🗑</button>
         </div>`;
       }).join('')}
     </div>
   </div>`;
 }
 
-async function openFeedPost(postId) {
-  const { items = [] } = await (await fetch(`${API}/api/feed-posts/${postId}/items`)).json();
-  document.getElementById('feed-modal-body').innerHTML = `<div class="hl-stories-grid">
-    ${items.map(item=>item.is_video
-      ?`<div class="hl-story-item"><video controls class="hl-story-media"><source src="${safeAttr(item.path)}"></video><div class="hl-story-date">${esc(item.filename||'')}</div></div>`
-      :`<div class="hl-story-item"><img class="hl-story-media" src="${safeAttr(item.path)}" onclick="openLightbox(${JSON.stringify(item.path)}, '', '')"><div class="hl-story-date">${esc(item.filename||'')}</div></div>`
-    ).join('')}
-  </div>`;
-  document.getElementById('feed-modal').classList.add('open');
+async function deleteFeedPost(e, postId) {
+  e.stopPropagation();
+  if (!confirm('Delete this post and its media?')) return;
+  try {
+    const r = await fetch(`${API}/api/feed-posts/${postId}`, {method:'DELETE'});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    showToast('Post deleted');
+    await renderFeedPosts();
+  } catch(err) { console.error('[Vault] deleteFeedPost failed:', err); showToast('Delete failed','error'); }
 }
 
-document.getElementById('add-field-form').addEventListener('submit', async e => {
+async function openFeedPost(postId) {
+  const modal = document.getElementById('feed-modal');
+  const body  = document.getElementById('feed-modal-body');
+  body.innerHTML = `<p style="text-align:center;padding:2rem;color:var(--muted2)">⏳ Loading…</p>`;
+  modal.classList.add('open');
+  try {
+    const res = await fetch(`${API}/api/feed-posts/${postId}/items`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { items = [] } = await res.json();
+    body.innerHTML = `<div class="hl-stories-grid">
+      ${items.map(item => item.is_video
+        ? `<div class="hl-story-item">
+             <video controls class="hl-story-media" preload="metadata">
+               <source src="${safeAttr(item.path)}">
+             </video>
+             <div class="hl-story-date">${esc(item.filename||'')}</div>
+           </div>`
+        : `<div class="hl-story-item">
+             <img class="hl-story-media" src="${safeAttr(item.path)}" loading="lazy"
+               onerror="this.style.opacity='0.15'"
+               onclick="openLightbox(${JSON.stringify(item.path)}, ${JSON.stringify(item.filename||'')}, '')">
+             <div class="hl-story-date">${esc(item.filename||'')}</div>
+           </div>`
+      ).join('')}
+    </div>`;
+  } catch(e) {
+    console.error('[Vault] openFeedPost failed:', e);
+    body.innerHTML = `<p style="text-align:center;padding:2rem;color:var(--color-error)">Failed to load items.</p>`;
+  }
+}
+
+
   e.preventDefault();
   const fd = new FormData(e.target);
   const res = await fetch(`${API}/api/people/${pid}/fields`, { method: 'POST', body: fd });
@@ -576,6 +662,15 @@ document.getElementById('lightbox').addEventListener('click', function(e) {
 document.getElementById('lb-close').addEventListener('click', () => {
   document.getElementById('lightbox').classList.remove('open');
 });
+// Close hl-modal and feed-modal on backdrop click
+document.getElementById('hl-modal')?.addEventListener('click', function(e) {
+  if (e.target === this) this.classList.remove('open');
+});
+document.getElementById('feed-modal')?.addEventListener('click', function(e) {
+  if (e.target === this) this.classList.remove('open');
+});
+
+
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     document.getElementById('lightbox').classList.remove('open');
