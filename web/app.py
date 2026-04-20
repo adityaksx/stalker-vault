@@ -358,7 +358,69 @@ def api_ig_delete_snapshot(sid: int):
     delete_ig_snapshot(sid)
     return {"ok": True}
 
-# ── Highlights ───────────────────────────────────────────────────────────────────
+# ── Highlights ────────────────────────────────────────────────────────────────────
+#
+# ZIP naming produced by the IG-Exporter browser extension:
+#   suhana_verma_28_highlights_2026_04_17.zip        → highlight 1
+#   suhana_verma_28_highlights_2026_04_17 (1).zip    → highlight 2  (different highlight, same person)
+#
+# The " (N)" part is a browser-download duplicate counter added automatically
+# when a file with that name already exists in Downloads.  It does NOT mean a
+# duplicate highlight — each numbered ZIP is a DISTINCT highlight export.
+# We strip the suffix only when building the display name, so both highlights
+# show a clean "Suhana Verma 28" label.  Because create_highlight() always
+# inserts a new row, each upload gets a unique hl_id and its own folder.
+#
+# Media filenames inside a highlights ZIP:
+#   suhana_verma_28_story_08_03_2026_00_00_053847755518354631780.mp4
+#   ──────────────── ───── ────────────── ─────────────────────────
+#   username         type  DD_MM_YYYY      random/unique id
+#
+# The IG-Exporter does NOT expose the actual story creation date — the date
+# segment in the filename (DD_MM_YYYY) is the best approximation available and
+# is stored as story_date.  When the pattern is absent, story_date is NULL.
+# ────────────────────────────────────────────────────────────────────────────────
+
+def _parse_hl_name_from_zip(zip_filename: str) -> str:
+    """
+    Derive a human-readable highlight display name from the ZIP filename.
+
+    Steps:
+      1. Strip the .zip extension
+      2. Strip any trailing browser duplicate counter like " (1)", " (2)" …
+      3. Extract the username portion before the '_highlights' keyword
+      4. Convert underscores to spaces and title-case the result
+
+    Examples:
+      "suhana_verma_28_highlights_2026_04_17.zip"     → "Suhana Verma 28"
+      "suhana_verma_28_highlights_2026_04_17 (1).zip" → "Suhana Verma 28"
+      "my_archive.zip"                                 → "My Archive"
+    """
+    stem = Path(zip_filename).stem                          # strip extension
+    stem = re.sub(r'\s*\(\d+\)\s*$', '', stem).strip()     # strip " (1)" etc.
+    m = re.match(r'^(.+?)_highlights?', stem, re.IGNORECASE)
+    if m:
+        return m.group(1).replace('_', ' ').strip().title()
+    return stem.replace('_', ' ').strip().title()
+
+
+def _parse_media_date(filename: str) -> str | None:
+    """
+    Extract a date from an IG-Exporter media filename.
+
+    Pattern inside filename: _DD_MM_YYYY_
+    Returns "YYYY-MM-DD" string, or None when the pattern is absent.
+
+    Examples:
+      "suhana_verma_28_story_08_03_2026_00_00_05…mp4" → "2026-03-08"
+      "sanskriti_sehgal18_post_05_04_2026_13_21_3….jpg" → "2026-04-05"
+    """
+    dm = re.search(r'_(\d{2})_(\d{2})_(\d{4})_', filename)
+    if dm:
+        return f"{dm.group(3)}-{dm.group(2)}-{dm.group(1)}"
+    return None
+
+
 @app.post("/api/people/{pid}/highlights/import-zip")
 async def import_highlight_zip(pid: int, file: UploadFile = File(...)):
     from database.db import get_person, create_highlight, add_highlight_story
@@ -367,99 +429,158 @@ async def import_highlight_zip(pid: int, file: UploadFile = File(...)):
 
     content  = await file.read()
     zip_name = file.filename or "highlight.zip"
-    stem     = zip_name.replace(".zip", "").replace(".ZIP", "")
-    m        = re.match(r'^(.+?)_highlights?', stem, re.IGNORECASE)
-    hl_name  = m.group(1).replace("_", " ").strip().title() if m else stem
-    hl_id    = create_highlight(pid, hl_name, zip_name)
+
+    # _parse_hl_name_from_zip strips the " (N)" suffix so display names are
+    # clean, but we ALWAYS call create_highlight() which inserts a fresh row —
+    # so "highlights_2026.zip" and "highlights_2026 (1).zip" become two
+    # separate hl_id values and two separate upload folders.
+    hl_name = _parse_hl_name_from_zip(zip_name)
+    hl_id   = create_highlight(pid, hl_name, zip_name)
 
     upload_dir = UPLOADS_DIR / str(pid) / "highlights" / str(hl_id)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
+    # seen_bases prevents double-importing when a ZIP nests the same file
+    # under multiple subdirectories (uncommon but possible in some exports).
+    seen_bases: set[str] = set()
     count = 0
+
     with zipfile.ZipFile(io.BytesIO(content)) as zf:
         for entry in sorted(zf.namelist()):
             base = Path(entry).name
-            if not base or base.startswith("."):
+            if not base or base.startswith('.') or base in seen_bases:
                 continue
             ext      = Path(base).suffix.lower()
-            is_video = ext in (".mp4", ".mov", ".webm", ".avi")
-            if not (is_video or ext in (".jpg", ".jpeg", ".png", ".webp", ".heic")):
+            is_video = ext in ('.mp4', '.mov', '.webm', '.avi')
+            if not (is_video or ext in ('.jpg', '.jpeg', '.png', '.webp', '.heic')):
                 continue
-            dm       = re.search(r'_(\d{2})_(\d{2})_(\d{4})_', base)
-            date_str = f"{dm.group(3)}-{dm.group(2)}-{dm.group(1)}" if dm else None
-            dest     = upload_dir / base
-            with zf.open(entry) as sf, open(dest, "wb") as df:
+
+            date_str = _parse_media_date(base)   # None when pattern absent — stored as NULL
+
+            dest = upload_dir / base
+            with zf.open(entry) as sf, open(dest, 'wb') as df:
                 df.write(sf.read())
+
             add_highlight_story(
                 hl_id, base,
                 f"/uploads/{pid}/highlights/{hl_id}/{base}",
                 is_video, date_str,
             )
+            seen_bases.add(base)
             count += 1
 
     return {"ok": True, "name": hl_name, "story_count": count, "id": hl_id}
 
-# FIX #4: wrap list returns in dicts to match frontend expectations
+
+@app.delete("/api/highlights/{hl_id}")
+def delete_highlight_route(hl_id: int):
+    """Delete a highlight and all its stored media files."""
+    from database.db import get_highlight_by_id, delete_highlight as db_del_hl
+    row = get_highlight_by_id(hl_id)
+    if row:
+        folder = UPLOADS_DIR / str(row["person_id"]) / "highlights" / str(hl_id)
+        if folder.exists():
+            shutil.rmtree(folder, ignore_errors=True)
+    db_del_hl(hl_id)
+    return {"ok": True}
+
+
 @app.get("/api/people/{pid}/highlights")
 def get_highlights(pid: int):
     from database.db import get_highlights as db_get_highlights
     return {"highlights": db_get_highlights(pid)}
+
 
 @app.get("/api/highlights/{hl_id}/stories")
 def get_highlight_stories(hl_id: int):
     from database.db import get_highlight_stories as db_get_highlight_stories
     return {"stories": db_get_highlight_stories(hl_id)}
 
+
 # ── Feed Posts ─────────────────────────────────────────────────────────────────
+#
+# ZIP naming: sanskriti_sehgal18_feed_2026_04_18.zip
+#
+# Media filenames inside a feed ZIP:
+#   sanskriti_sehgal18_post_05_04_2026_13_21_383868448916262573133.jpg
+#   sanskriti_sehgal18_post_17_04_2026_02_41_323876827530695779050.mp4
+#   vnshka_rawww___reel_04_04_2026_14_11_293867750530513370647.mp4
+#
+# Files are grouped into posts by their DD_MM_YYYY date.  Each post gets its
+# own subfolder:  uploads/{pid}/feed/{post_id}/
+# This avoids filename collisions when two posts contain identically-named files.
+# ────────────────────────────────────────────────────────────────────────────────
+
 @app.post("/api/people/{pid}/feed-posts/import-zip")
 async def import_feed_zip(pid: int, file: UploadFile = File(...)):
     from database.db import get_person, create_feed_post, add_feed_post_item
     if not get_person(pid):
         raise HTTPException(404, "Person not found")
 
-    content    = await file.read()
-    zip_name   = file.filename or "feed.zip"
-    upload_dir = UPLOADS_DIR / str(pid) / "feed"
-    upload_dir.mkdir(parents=True, exist_ok=True)
+    content  = await file.read()
+    zip_name = file.filename or "feed.zip"
 
-    def parse_date(name: str) -> str:
-        dm = re.search(r'_(\d{2})_(\d{2})_(\d{4})_', name)
-        return f"{dm.group(3)}-{dm.group(2)}-{dm.group(1)}" if dm else "unknown"
-
+    # ── Pass 1: scan ZIP, group entries by date ──────────────────────────────
     groups: dict[str, list] = {}
     with zipfile.ZipFile(io.BytesIO(content)) as zf:
         for entry in sorted(zf.namelist()):
             base = Path(entry).name
-            if not base or base.startswith("."):
+            if not base or base.startswith('.'):
                 continue
             ext      = Path(base).suffix.lower()
-            is_video = ext in (".mp4", ".mov", ".webm", ".avi")
-            if not (is_video or ext in (".jpg", ".jpeg", ".png", ".webp", ".heic")):
+            is_video = ext in ('.mp4', '.mov', '.webm', '.avi')
+            if not (is_video or ext in ('.jpg', '.jpeg', '.png', '.webp', '.heic')):
                 continue
-            groups.setdefault(parse_date(base), []).append((entry, base, is_video))
+            date_key = _parse_media_date(base) or "unknown"
+            groups.setdefault(date_key, []).append((entry, base, is_video))
 
+    # ── Pass 2: create one feed_post row per date, extract media ────────────
     post_count = 0
     with zipfile.ZipFile(io.BytesIO(content)) as zf:
-        for dk, items in sorted(groups.items()):
-            post_id = create_feed_post(pid, dk, zip_name)
+        for date_key, items in sorted(groups.items()):
+            post_id  = create_feed_post(pid, date_key, zip_name)
+            # Isolated subfolder per post — prevents cross-post filename collisions
+            post_dir = UPLOADS_DIR / str(pid) / "feed" / str(post_id)
+            post_dir.mkdir(parents=True, exist_ok=True)
             for entry, base, is_video in items:
-                dest = upload_dir / base
-                with zf.open(entry) as sf, open(dest, "wb") as df:
+                dest = post_dir / base
+                with zf.open(entry) as sf, open(dest, 'wb') as df:
                     df.write(sf.read())
-                add_feed_post_item(post_id, base, f"/uploads/{pid}/feed/{base}", is_video, dk)
+                add_feed_post_item(
+                    post_id, base,
+                    f"/uploads/{pid}/feed/{post_id}/{base}",
+                    is_video, date_key,
+                )
             post_count += 1
 
     return {"ok": True, "post_count": post_count}
+
+
+@app.delete("/api/feed-posts/{post_id}")
+def delete_feed_post_route(post_id: int):
+    """Delete a feed post and all its stored media files."""
+    from database.db import get_feed_post_by_id, delete_feed_post as db_del_fp
+    row = get_feed_post_by_id(post_id)
+    if row:
+        folder = UPLOADS_DIR / str(row["person_id"]) / "feed" / str(post_id)
+        if folder.exists():
+            shutil.rmtree(folder, ignore_errors=True)
+    db_del_fp(post_id)
+    return {"ok": True}
+
 
 @app.get("/api/people/{pid}/feed-posts")
 def get_feed_posts(pid: int):
     from database.db import get_feed_posts as db_get_feed_posts
     return {"posts": db_get_feed_posts(pid)}
 
+
 @app.get("/api/feed-posts/{post_id}/items")
 def get_feed_post_items(post_id: int):
     from database.db import get_feed_post_items as db_get_feed_post_items
     return {"items": db_get_feed_post_items(post_id)}
+
+
 
 # ── Instagram PFP fetching ─────────────────────────────────────────────────────────
 def _get_browser_cookies() -> dict:
