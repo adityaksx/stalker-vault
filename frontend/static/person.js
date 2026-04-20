@@ -196,7 +196,7 @@ async function renderMedia() {
     html += `<div class="info-section" id="photos-section">
       <div class="media-section-header">
         <h2>📷 Photos &amp; Screenshots (${photos.length})</h2>
-        ${photos.length>5?`<button class="btn btn-secondary btn-sm" onclick="toggleBlur('photos-section',this)">👁 Show All</button>`:''}
+        <button class="btn btn-secondary btn-sm" onclick="toggleBlur('photos-section',this)">👁 Show All</button>
       </div>
       <div class="screenshots-grid blurred-group" id="photos-grid" data-expanded="0">
         ${preview.map(m=>mediaThumbHTML(m,true)).join('')}
@@ -210,7 +210,7 @@ async function renderMedia() {
     html += `<div class="info-section" id="videos-section">
       <div class="media-section-header">
         <h2>🎬 Videos (${videos.length})</h2>
-        ${videos.length>5?`<button class="btn btn-secondary btn-sm" onclick="toggleBlur('videos-section',this)">👁 Show All</button>`:''}
+        <button class="btn btn-secondary btn-sm" onclick="toggleBlur('videos-section',this)">👁 Show All</button>
       </div>
       <div class="screenshots-grid blurred-group" id="videos-grid" data-expanded="0">
         ${preview.map(m=>videoThumbHTML(m,true)).join('')}
