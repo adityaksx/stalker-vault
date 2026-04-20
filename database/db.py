@@ -314,7 +314,7 @@ def init_highlight_tables():
         added_at    TEXT DEFAULT (datetime('now','localtime')),
         FOREIGN KEY (post_id) REFERENCES feed_posts(id) ON DELETE CASCADE
     )""")
-    conn.commit()   # ← was missing; without this DDL is rolled back on conn.close()
+    conn.commit()   # ← was missing in original; without this DDL is rolled back on conn.close()
     conn.close()
 
 def create_highlight(person_id, name, zip_name=None):
@@ -336,14 +336,14 @@ def get_highlights(person_id):
     conn = get_connection()
     c = conn.cursor()
     c.execute("""
-        SELECT h.id,h.name,h.imported_at,COUNT(s.id),
+        SELECT h.id, h.name, h.imported_at, COUNT(s.id),
                (SELECT path FROM ig_highlight_stories WHERE highlight_id=h.id AND is_video=0 LIMIT 1)
         FROM ig_highlights h LEFT JOIN ig_highlight_stories s ON s.highlight_id=h.id
         WHERE h.person_id=? GROUP BY h.id ORDER BY h.imported_at DESC
     """, (person_id,))
     rows = c.fetchall()
     conn.close()
-    return [dict(zip(['id','name','imported_at','story_count','thumb'], r)) for r in rows]
+    return [dict(zip(['id', 'name', 'imported_at', 'story_count', 'thumb'], r)) for r in rows]
 
 def get_highlight_stories(highlight_id):
     conn = get_connection()
@@ -353,7 +353,7 @@ def get_highlight_stories(highlight_id):
         (highlight_id,))
     rows = c.fetchall()
     conn.close()
-    return [dict(zip(['id','filename','path','is_video','story_date','added_at'], r)) for r in rows]
+    return [dict(zip(['id', 'filename', 'path', 'is_video', 'story_date', 'added_at'], r)) for r in rows]
 
 def create_feed_post(person_id, post_date, zip_name=None):
     conn = get_connection()
@@ -384,7 +384,7 @@ def get_feed_posts(person_id):
             'id': post_id,
             'post_date': post_date,
             'added_at': added_at,
-            'items': [dict(zip(['id','filename','path','is_video'], i)) for i in items]
+            'items': [dict(zip(['id', 'filename', 'path', 'is_video'], i)) for i in items]
         })
     conn.close()
     return posts
@@ -395,4 +395,62 @@ def get_feed_post_items(post_id):
     c.execute("SELECT id,filename,path,is_video,item_date FROM feed_post_items WHERE post_id=? ORDER BY item_date,filename", (post_id,))
     rows = c.fetchall()
     conn.close()
-    return [dict(zip(['id','filename','path','is_video','item_date'], r)) for r in rows]
+    return [dict(zip(['id', 'filename', 'path', 'is_video', 'item_date'], r)) for r in rows]
+
+
+# ── Highlight helpers (required by DELETE /api/highlights/{hl_id} in app.py) ──
+
+def get_highlight_by_id(hl_id: int):
+    """
+    Return a single ig_highlights row as a dict, or None if not found.
+    Used by the delete route in app.py to resolve person_id → upload folder path.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT id, person_id, name, zip_name FROM ig_highlights WHERE id=?", (hl_id,))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return dict(zip(['id', 'person_id', 'name', 'zip_name'], row))
+
+def delete_highlight(hl_id: int):
+    """
+    Delete an ig_highlights row by id.
+    ON DELETE CASCADE in ig_highlight_stories removes all child story rows automatically.
+    The upload folder on disk is removed by the caller (app.py delete route).
+    """
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM ig_highlights WHERE id=?", (hl_id,))
+    conn.commit()
+    conn.close()
+
+
+# ── Feed post helpers (required by DELETE /api/feed-posts/{post_id} in app.py) ──
+
+def get_feed_post_by_id(post_id: int):
+    """
+    Return a single feed_posts row as a dict, or None if not found.
+    Used by the delete route in app.py to resolve person_id → upload folder path.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT id, person_id, post_date FROM feed_posts WHERE id=?", (post_id,))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return dict(zip(['id', 'person_id', 'post_date'], row))
+
+def delete_feed_post(post_id: int):
+    """
+    Delete a feed_posts row by id.
+    ON DELETE CASCADE in feed_post_items removes all child item rows automatically.
+    The upload folder on disk is removed by the caller (app.py delete route).
+    """
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM feed_posts WHERE id=?", (post_id,))
+    conn.commit()
+    conn.close()
