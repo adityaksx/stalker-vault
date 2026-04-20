@@ -935,60 +935,6 @@ video.screenshot-thumb { aspect-ratio: 9 / 16; cursor: default; }
 .ig-hl-name  { font-size: 0.72rem; margin-top: 0.4rem; text-align: center; font-weight: 500; word-break: break-word; max-width: 80px; }
 .ig-hl-count { font-size: 0.68rem; color: var(--muted2); }
 
-/* ── Highlight bubble wrapper (for delete btn) ─────────── */
-.ig-highlight-bubble-wrap {
-  position: relative;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-}
-.ig-highlight-bubble-wrap .hl-del-btn {
-  display: none;
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  z-index: 2;
-  background: #e53e3e;
-  color: #fff;
-  border: none;
-  border-radius: 50%;
-  width: 22px;
-  height: 22px;
-  font-size: 0.7rem;
-  line-height: 1;
-  cursor: pointer;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-  padding: 0;
-}
-.ig-highlight-bubble-wrap:hover .hl-del-btn { display: flex; }
-
-/* ── Feed post card wrapper (for delete btn) ─────────────── */
-.feed-post-card-wrap {
-  position: relative;
-}
-.feed-post-card-wrap .feed-del-btn {
-  display: none;
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  z-index: 2;
-  background: rgba(229,62,62,0.9);
-  color: #fff;
-  border: none;
-  border-radius: 50%;
-  width: 24px;
-  height: 24px;
-  font-size: 0.72rem;
-  line-height: 1;
-  cursor: pointer;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
-  padding: 0;
-}
-.feed-post-card-wrap:hover .feed-del-btn { display: flex; }
 
 
 .hl-stories-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem; }
@@ -1040,3 +986,10 @@ video.screenshot-thumb { aspect-ratio: 9 / 16; cursor: default; }
   .person-hero { flex-direction: column; align-items: center; text-align: center; padding: 1.5rem; }
   .hero-actions { justify-content: center; }
 }
+/* ── Highlight + Feed delete buttons (added by fix) ── */
+.ig-highlight-bubble-wrap { position: relative; display: inline-flex; flex-direction: column; align-items: center; }
+.ig-highlight-bubble-wrap .hl-del-btn { display: none; position: absolute; top: -6px; right: -6px; z-index: 2; background: #e53e3e; color: #fff; border: none; border-radius: 50%; width: 22px; height: 22px; font-size: 0.72rem; cursor: pointer; align-items: center; justify-content: center; box-shadow: 0 2px 6px rgba(0,0,0,0.4); padding: 0; }
+.ig-highlight-bubble-wrap:hover .hl-del-btn { display: flex; }
+.feed-post-card-wrap { position: relative; }
+.feed-post-card-wrap .feed-del-btn { display: none; position: absolute; top: 4px; right: 4px; z-index: 2; background: rgba(229,62,62,0.9); color: #fff; border: none; border-radius: 50%; width: 24px; height: 24px; font-size: 0.72rem; cursor: pointer; align-items: center; justify-content: center; box-shadow: 0 2px 6px rgba(0,0,0,0.5); padding: 0; }
+.feed-post-card-wrap:hover .feed-del-btn { display: flex; }
