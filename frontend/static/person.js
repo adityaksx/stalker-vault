@@ -472,6 +472,7 @@ async function openFeedPost(postId) {
 }
 
 
+document.getElementById('add-field-form').addEventListener('submit', async e => {
   e.preventDefault();
   const fd = new FormData(e.target);
   const res = await fetch(`${API}/api/people/${pid}/fields`, { method: 'POST', body: fd });
